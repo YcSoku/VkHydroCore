@@ -4,16 +4,19 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <filesystem>
 #include <vulkan/vulkan.h>
-
 #include "config.h"
 #include "core/Core.h"
 
+namespace fs = std::filesystem;
 namespace NextHydro {
 
-    ////////////////////////////// Helpers //////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Helpers ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     std::vector<const char*> deviceExtensions = {
     };
@@ -185,13 +188,32 @@ namespace NextHydro {
             return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
-    ////////////////////////////// Core //////////////////////////////
+    std::vector<char> readFile(const char* filename) {
+
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file: " + std::string(filename));
+        }
+
+        std::streamsize fileSize = file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+        file.close();
+
+        return buffer;
+    }
+
+    // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Core ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     Core::Core() {
         createInstance();
         setupDebugMessenger();
         pickPhysicalDevice();
         createLogicalDevice();
+        createCommandPool();
     }
 
     Core::~Core() {
@@ -327,5 +349,146 @@ namespace NextHydro {
             throw std::runtime_error("failed to create logical m_device!");
         }
         vkGetDeviceQueue(device, indices.computeFamily.value(), 0, &computeQueue);
+    }
+
+    void Core::createCommandPool() {
+
+        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+        VkCommandPoolCreateInfo poolInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = queueFamilyIndices.computeFamily.value()
+        };
+
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute command pool");
+        }
+    }
+
+    void Core::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset) {
+
+        VkCommandBufferAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = commandPool,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1
+        };
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+        };
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion = {
+                .srcOffset = srcOffset,
+                .dstOffset = dstOffset,
+                .size = size,
+        };
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffer
+        };
+
+        vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(computeQueue);
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+
+    Buffer Core::createStagingBuffer(VkDeviceSize size) const {
+
+        Buffer stagingBuffer(device, physicalDevice,
+                             size,
+                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        return stagingBuffer;
+    }
+
+    VkShaderModule Core::createShaderModule(const std::vector<char>& code) const {
+
+        VkShaderModuleCreateInfo createInfo = {
+                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .codeSize = code.size(),
+                .pCode = reinterpret_cast<const uint32_t*>(code.data())
+        };
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader module!");
+        }
+        return shaderModule;
+    }
+
+    VkDescriptorSetLayout Core::createComputeDescriptorSetLayout(const std::vector<VkDescriptorSetLayoutBinding>& bindings) const {
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = bindings.size();
+        layoutInfo.pBindings = bindings.data();
+
+        VkDescriptorSetLayout computeDescriptorSetLayout;
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute descriptor set layout!");
+        }
+
+        return computeDescriptorSetLayout;
+    }
+
+    VkPipeline Core::createComputePipeline(const char *shaderPath) const {
+
+        auto path = SHADER_PATH / fs::path(shaderPath);
+        auto computeShaderCode = readFile(path.c_str());
+        auto computeShaderModule = createShaderModule(computeShaderCode);
+
+        VkPipelineShaderStageCreateInfo computeShaderStageInfo = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module = computeShaderModule,
+                .pName = "main"
+        };
+
+        auto computeDescriptorLayout = createComputeDescriptorSetLayout(std::vector<VkDescriptorSetLayoutBinding>{
+                VkDescriptorSetLayoutBinding{
+                        .binding = 0,
+                        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                        .descriptorCount = 1,
+                        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                        .pImmutableSamplers = nullptr
+                }
+        });
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .setLayoutCount = 1,
+                .pSetLayouts = &computeDescriptorLayout
+        };
+
+        VkPipelineLayout computePipelineLayout;
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute pipeline layout!");
+        }
+
+        VkComputePipelineCreateInfo pipelineInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                .stage = computeShaderStageInfo,
+                .layout = computePipelineLayout
+        };
+
+        VkPipeline computePipeline;
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute pipeline!");
+        }
+
+        vkDestroyShaderModule(device, computeShaderModule, nullptr);
+        return computePipeline;
     }
 };
