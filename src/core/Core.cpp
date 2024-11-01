@@ -4,16 +4,19 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <filesystem>
 #include <vulkan/vulkan.h>
-
 #include "config.h"
 #include "core/Core.h"
 
+namespace fs = std::filesystem;
 namespace NextHydro {
 
-    ////////////////////////////// Helpers //////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Helpers ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     std::vector<const char*> deviceExtensions = {
     };
@@ -185,16 +188,23 @@ namespace NextHydro {
             return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
-    ////////////////////////////// Core //////////////////////////////
+    // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Core ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     Core::Core() {
         createInstance();
         setupDebugMessenger();
         pickPhysicalDevice();
         createLogicalDevice();
+        createCommandPool();
+        createDescriptorPool();
+        createComputeCommandBuffer();
+        createSyncObjects();
     }
 
     Core::~Core() {
+
+        vkDestroyDescriptorPool(device, storageDescriptorPool, nullptr);
 
         vkDestroyDevice(device, nullptr);
 
@@ -327,5 +337,195 @@ namespace NextHydro {
             throw std::runtime_error("failed to create logical m_device!");
         }
         vkGetDeviceQueue(device, indices.computeFamily.value(), 0, &computeQueue);
+    }
+
+    void Core::createCommandPool() {
+
+        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+        VkCommandPoolCreateInfo poolInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = queueFamilyIndices.computeFamily.value()
+        };
+
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute command pool");
+        }
+    }
+
+    void Core::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset) {
+
+        VkCommandBufferAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = commandPool,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1
+        };
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+        };
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion = {
+                .srcOffset = srcOffset,
+                .dstOffset = dstOffset,
+                .size = size,
+        };
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffer
+        };
+
+        vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(computeQueue);
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+
+    Buffer Core::createStagingBuffer(VkDeviceSize size) const {
+
+        Buffer stagingBuffer(device, physicalDevice,
+                             size,
+                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        return stagingBuffer;
+    }
+
+    ComputePipeline Core::createComputePipeline(const char *shaderPath) const {
+
+        return ComputePipeline{ device, shaderPath };
+    }
+
+    void Core::createDescriptorPool() {
+
+        VkDescriptorPoolSize poolSize = {
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                .maxSets = 1,
+                .poolSizeCount = 1,
+                .pPoolSizes = &poolSize,
+        };
+
+//        VkDescriptorPool storageDescriptorPool;
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &storageDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+    }
+
+    VkDescriptorSet Core::createDescriptorSets(const ComputePipeline& pipeline, const Buffer& buffer) {
+
+        VkDescriptorSetAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .descriptorPool = storageDescriptorPool,
+                .descriptorSetCount = static_cast<uint32_t>(pipeline.descriptorLayouts.size()),
+                .pSetLayouts = pipeline.descriptorLayouts.data()
+        };
+
+        VkDescriptorSet descriptorSet;
+        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor sets!");
+        }
+
+        VkDescriptorBufferInfo bufferInfo = {
+                .buffer = buffer.buffer,
+                .offset = 0,
+                .range = buffer.size
+        };
+
+        VkWriteDescriptorSet descriptorWrite = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = descriptorSet,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &bufferInfo
+        };
+
+        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        return descriptorSet;
+    }
+
+    void Core::createComputeCommandBuffer() {
+
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, &computeCommandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate compute command buffers!");
+        }
+    }
+
+    void Core::recordComputeCommandBuffer(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) const {
+
+        VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        };
+
+        if (vkBeginCommandBuffer(computeCommandBuffer, &beginInfo) != VK_SUCCESS) {
+            throw std::runtime_error("failed to begin recording compute command buffer!");
+        }
+
+        vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
+        vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &descriptorSet, 0,nullptr);
+
+        vkCmdDispatch(computeCommandBuffer, 1, 1, 1);
+
+        if (vkEndCommandBuffer(computeCommandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to record compute command buffer!");
+        }
+    }
+
+    void Core::createSyncObjects() {
+
+        VkSemaphoreCreateInfo semaphoreInfo = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+        };
+
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores) != VK_SUCCESS || vkCreateFence(device, &fenceInfo, nullptr, &computeInFlightFences) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute synchronization objects for a frame!");
+        }
+    }
+
+    void Core::tick(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) {
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        };
+        vkWaitForFences(device, 1, &computeInFlightFences, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &computeInFlightFences);
+        vkResetCommandBuffer(computeCommandBuffer, 0);
+        recordComputeCommandBuffer(computePipeline, descriptorSet);
+
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &computeCommandBuffer;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &computeFinishedSemaphores;
+
+        if (vkQueueSubmit(computeQueue, 1, &submitInfo, computeInFlightFences) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit compute command buffer!");
+        };
     }
 };

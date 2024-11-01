@@ -34,6 +34,7 @@ file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
 file(GLOB SHADER_FILES
         "${SHADER_SOURCE_DIR}/*.vert"
         "${SHADER_SOURCE_DIR}/*.frag"
+        "${SHADER_SOURCE_DIR}/*.comp"
 )
 foreach (SHADER_FILE ${SHADER_FILES})
     get_filename_component(FILENAME ${SHADER_FILE} NAME)
@@ -65,10 +66,6 @@ FetchContent_MakeAvailable(glm)
 list(APPEND LIBS glm::glm)
 
 # stb
-#set(STB_DIR "${LOCAL_THIRD_PARTY_DIR}/stb")
-#include_directories("${STB_DIR}/include")
-#add_library(stb "${STB_DIR}/stb_image.cpp")
-#list(APPEND LIBS stb)
 FetchContent_Declare(
         stb
         GIT_REPOSITORY https://github.com/nothings/stb.git
