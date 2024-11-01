@@ -188,23 +188,6 @@ namespace NextHydro {
             return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
-    std::vector<char> readFile(const char* filename) {
-
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
-        if (!file.is_open()) {
-            throw std::runtime_error("failed to open file: " + std::string(filename));
-        }
-
-        std::streamsize fileSize = file.tellg();
-        std::vector<char> buffer(fileSize);
-
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
-        file.close();
-
-        return buffer;
-    }
-
     // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Core ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -214,9 +197,14 @@ namespace NextHydro {
         pickPhysicalDevice();
         createLogicalDevice();
         createCommandPool();
+        createDescriptorPool();
+        createComputeCommandBuffer();
+        createSyncObjects();
     }
 
     Core::~Core() {
+
+        vkDestroyDescriptorPool(device, storageDescriptorPool, nullptr);
 
         vkDestroyDevice(device, nullptr);
 
@@ -413,82 +401,131 @@ namespace NextHydro {
         return stagingBuffer;
     }
 
-    VkShaderModule Core::createShaderModule(const std::vector<char>& code) const {
+    ComputePipeline Core::createComputePipeline(const char *shaderPath) const {
 
-        VkShaderModuleCreateInfo createInfo = {
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = code.size(),
-                .pCode = reinterpret_cast<const uint32_t*>(code.data())
-        };
-
-        VkShaderModule shaderModule;
-        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create shader module!");
-        }
-        return shaderModule;
+        return ComputePipeline{ device, shaderPath };
     }
 
-    VkDescriptorSetLayout Core::createComputeDescriptorSetLayout(const std::vector<VkDescriptorSetLayoutBinding>& bindings) const {
+    void Core::createDescriptorPool() {
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = bindings.size();
-        layoutInfo.pBindings = bindings.data();
+        VkDescriptorPoolSize poolSize = {
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1
+        };
 
-        VkDescriptorSetLayout computeDescriptorSetLayout;
-        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create compute descriptor set layout!");
+        VkDescriptorPoolCreateInfo poolInfo = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                .maxSets = 1,
+                .poolSizeCount = 1,
+                .pPoolSizes = &poolSize,
+        };
+
+//        VkDescriptorPool storageDescriptorPool;
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &storageDescriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
         }
-
-        return computeDescriptorSetLayout;
     }
 
-    VkPipeline Core::createComputePipeline(const char *shaderPath) const {
+    VkDescriptorSet Core::createDescriptorSets(const ComputePipeline& pipeline, const Buffer& buffer) {
 
-        auto path = SHADER_PATH / fs::path(shaderPath);
-        auto computeShaderCode = readFile(path.c_str());
-        auto computeShaderModule = createShaderModule(computeShaderCode);
-
-        VkPipelineShaderStageCreateInfo computeShaderStageInfo = {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-                .module = computeShaderModule,
-                .pName = "main"
+        VkDescriptorSetAllocateInfo allocInfo = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .descriptorPool = storageDescriptorPool,
+                .descriptorSetCount = static_cast<uint32_t>(pipeline.descriptorLayouts.size()),
+                .pSetLayouts = pipeline.descriptorLayouts.data()
         };
 
-        auto computeDescriptorLayout = createComputeDescriptorSetLayout(std::vector<VkDescriptorSetLayoutBinding>{
-                VkDescriptorSetLayoutBinding{
-                        .binding = 0,
-                        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        .descriptorCount = 1,
-                        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-                        .pImmutableSamplers = nullptr
-                }
-        });
-
-        VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .setLayoutCount = 1,
-                .pSetLayouts = &computeDescriptorLayout
-        };
-
-        VkPipelineLayout computePipelineLayout;
-        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create compute pipeline layout!");
+        VkDescriptorSet descriptorSet;
+        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor sets!");
         }
 
-        VkComputePipelineCreateInfo pipelineInfo = {
-                .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                .stage = computeShaderStageInfo,
-                .layout = computePipelineLayout
+        VkDescriptorBufferInfo bufferInfo = {
+                .buffer = buffer.buffer,
+                .offset = 0,
+                .range = buffer.size
         };
 
-        VkPipeline computePipeline;
-        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create compute pipeline!");
+        VkWriteDescriptorSet descriptorWrite = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = descriptorSet,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &bufferInfo
+        };
+
+        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        return descriptorSet;
+    }
+
+    void Core::createComputeCommandBuffer() {
+
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, &computeCommandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate compute command buffers!");
+        }
+    }
+
+    void Core::recordComputeCommandBuffer(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) const {
+
+        VkCommandBufferBeginInfo beginInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        };
+
+        if (vkBeginCommandBuffer(computeCommandBuffer, &beginInfo) != VK_SUCCESS) {
+            throw std::runtime_error("failed to begin recording compute command buffer!");
         }
 
-        vkDestroyShaderModule(device, computeShaderModule, nullptr);
-        return computePipeline;
+        vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
+        vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &descriptorSet, 0,nullptr);
+
+        vkCmdDispatch(computeCommandBuffer, 1, 1, 1);
+
+        if (vkEndCommandBuffer(computeCommandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to record compute command buffer!");
+        }
+    }
+
+    void Core::createSyncObjects() {
+
+        VkSemaphoreCreateInfo semaphoreInfo = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+        };
+
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores) != VK_SUCCESS || vkCreateFence(device, &fenceInfo, nullptr, &computeInFlightFences) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute synchronization objects for a frame!");
+        }
+    }
+
+    void Core::tick(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) {
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+        };
+        vkWaitForFences(device, 1, &computeInFlightFences, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &computeInFlightFences);
+        vkResetCommandBuffer(computeCommandBuffer, 0);
+        recordComputeCommandBuffer(computePipeline, descriptorSet);
+
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &computeCommandBuffer;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &computeFinishedSemaphores;
+
+        if (vkQueueSubmit(computeQueue, 1, &submitInfo, computeInFlightFences) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit compute command buffer!");
+        };
     }
 };
