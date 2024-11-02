@@ -1,6 +1,0 @@
-#pragma once
-#define ROOT_DIR "@CMAKE_SOURCE_DIR@"
-#define W_ROOT_DIR L"@CMAKE_SOURCE_DIR@"
-#define SHADER_PATH "@SHADER_BINARY_DIR@"
-
-#cmakedefine ENABLE_VALIDATION_LAYER
