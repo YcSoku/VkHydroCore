@@ -4,14 +4,14 @@
 #include <set>
 #include <map>
 #include <vector>
-#include <fstream>
 #include <iostream>
 #include <stdexcept>
-#include <filesystem>
 #include <vulkan/vulkan.h>
 #include "config.h"
 #include "HydroCore/Core.h"
+#include "nlohmann/json.hpp"
 
+using Json = nlohmann::json;
 namespace fs = std::filesystem;
 namespace NextHydro {
 
@@ -20,6 +20,47 @@ namespace NextHydro {
 
     std::vector<const char*> deviceExtensions = {
     };
+
+    std::vector<char> readFile(const char* filename) {
+
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file: " + std::string(filename));
+        }
+
+        std::streamsize fileSize = file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+        file.close();
+
+        return buffer;
+    }
+
+    Json readJsonFile(const fs::path& jsonPath) {
+
+        std::ifstream f(jsonPath);
+
+        if (!f) {
+            throw std::runtime_error("failed to open JSON file: " + jsonPath.string());
+        }
+
+        return Json::parse(f);
+    }
+
+    std::string readShaderFile(const std::string& filePath) {
+        std::ifstream file(filePath);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filePath << std::endl;
+            return "";
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        file.close();
+        return buffer.str();
+    }
 
 #ifdef ENABLE_VALIDATION_LAYER
 
@@ -161,9 +202,9 @@ namespace NextHydro {
         if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             score += 1000;
         }
-//    if (!deviceFeatures.shaderFloat64) {
-//        return 0;
-//    }
+        if (!deviceFeatures.shaderFloat64) {
+            score += 1000;
+        }
         bool extensionsSupported = checkDeviceExtensionSupport(device);
 
         QueueFamilyIndices indices = findQueueFamilies(device);
@@ -197,7 +238,6 @@ namespace NextHydro {
         pickPhysicalDevice();
         createLogicalDevice();
         createCommandPool();
-        createDescriptorPool();
         createComputeCommandBuffer();
         createSyncObjects();
     }
@@ -250,26 +290,23 @@ namespace NextHydro {
         createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*) &debugCreateInfo;
 #else
         createInfo.enabledLayerCount = 0;
-        createInfo.ppEnabledExtensionNames = nullptr;
 #endif
 
         VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
         if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create Vulkan instance");
+            throw std::runtime_error("failed to create Vulkan instance");
         }
     }
 
     void Core::setupDebugMessenger() {
 
-#ifndef ENABLE_VALIDATION_LAYER
-        return;
-#endif
-
+#ifdef ENABLE_VALIDATION_LAYER
         VkDebugUtilsMessengerCreateInfoEXT createInfo;
         populateDebugMessengerCreateInfo(createInfo);
 
         if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &m_debugMessenger) != VK_SUCCESS)
             throw std::runtime_error("failed to set up debug messenger!");
+#endif
     }
 
     void Core::pickPhysicalDevice() {
@@ -304,7 +341,7 @@ namespace NextHydro {
         std::set<uint32_t> uniqueQueueFamilies = { indices.computeFamily.value() };
 
         float queuePriority = 1.0f;
-        for (auto queueFamily : uniqueQueueFamilies) {
+        for (const auto& queueFamily : uniqueQueueFamilies) {
 
             VkDeviceQueueCreateInfo queueCreateInfo = {
                     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -393,7 +430,7 @@ namespace NextHydro {
 
     Buffer Core::createStagingBuffer(VkDeviceSize size) const {
 
-        Buffer stagingBuffer(device, physicalDevice,
+        Buffer stagingBuffer(device, "", physicalDevice,
                              size,
                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
@@ -401,16 +438,16 @@ namespace NextHydro {
         return stagingBuffer;
     }
 
-    ComputePipeline Core::createComputePipeline(const char *shaderPath) const {
+    ComputePipeline* Core::createComputePipeline(const char *shaderPath) const {
 
-        return ComputePipeline{ device, shaderPath };
+        return new ComputePipeline{ device, "", shaderPath };
     }
 
     void Core::createDescriptorPool() {
 
         VkDescriptorPoolSize poolSize = {
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1
+                .descriptorCount = 2
         };
 
         VkDescriptorPoolCreateInfo poolInfo = {
@@ -423,40 +460,6 @@ namespace NextHydro {
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &storageDescriptorPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create descriptor pool!");
         }
-    }
-
-    VkDescriptorSet Core::createDescriptorSets(const ComputePipeline& pipeline, const Buffer& buffer) {
-
-        VkDescriptorSetAllocateInfo allocInfo = {
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                .descriptorPool = storageDescriptorPool,
-                .descriptorSetCount = static_cast<uint32_t>(pipeline.descriptorLayouts.size()),
-                .pSetLayouts = pipeline.descriptorLayouts.data()
-        };
-
-        VkDescriptorSet descriptorSet;
-        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate descriptor sets!");
-        }
-
-        VkDescriptorBufferInfo bufferInfo = {
-                .buffer = buffer.buffer,
-                .offset = 0,
-                .range = buffer.size
-        };
-
-        VkWriteDescriptorSet descriptorWrite = {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = descriptorSet,
-                .dstBinding = 0,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo = &bufferInfo
-        };
-
-        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
-        return descriptorSet;
     }
 
     void Core::createComputeCommandBuffer() {
@@ -472,18 +475,17 @@ namespace NextHydro {
         }
     }
 
-    void Core::recordComputeCommandBuffer(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) const {
+    void Core::recordComputeCommandBuffer(const ComputePipeline& computePipeline) const {
 
         VkCommandBufferBeginInfo beginInfo = {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
-
         if (vkBeginCommandBuffer(computeCommandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording compute command buffer!");
         }
 
         vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
-        vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &descriptorSet, 0,nullptr);
+        vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, computePipeline.descriptorSets.size(), computePipeline.descriptorSets.data(), 0,nullptr);
 
         vkCmdDispatch(computeCommandBuffer, 1, 1, 1);
 
@@ -508,13 +510,13 @@ namespace NextHydro {
         }
     }
 
-    void Core::tick(const ComputePipeline& computePipeline, const VkDescriptorSet& descriptorSet) {
+    void Core::tick(ComputePipeline* computePipeline) {
 
         vkWaitForFences(device, 1, &computeInFlightFences, VK_TRUE, UINT64_MAX);
         vkResetFences(device, 1, &computeInFlightFences);
 
         vkResetCommandBuffer(computeCommandBuffer, 0);
-        recordComputeCommandBuffer(computePipeline, descriptorSet);
+        recordComputeCommandBuffer(*computePipeline);
 
         VkSubmitInfo submitInfo = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -526,6 +528,68 @@ namespace NextHydro {
 
         if (vkQueueSubmit(computeQueue, 1, &submitInfo, computeInFlightFences) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit compute command buffer!");
-        };
+        }
     }
-};
+
+    void Core::idle() const {
+        vkDeviceWaitIdle(device);
+    }
+
+    void Core::parseScript(const char *path) {
+
+        // Read json
+        Json script = readJsonFile(path);
+
+        // Get assets
+        const auto& shaders = script["shaders"];
+        const auto& buffers = script["buffers"];
+        const auto& passes = script["passes"];
+
+        // Create pipelines
+        for (const auto& shaderInfo: shaders) {
+            auto name = shaderInfo["name"].get<std::string>();
+            auto glslCode = readShaderFile(shaderInfo["path"].get<std::string>());
+            pipelineMap.emplace(name, std::make_unique<ComputePipeline>(device, name.c_str(), glslCode.c_str()));
+        }
+
+        // Create buffers
+        for (const auto& bufferInfo: buffers) {
+            std::string name = bufferInfo["name"];
+            std::vector<float> data = bufferInfo["data"];
+            auto buffer = createStorageBuffer(name.c_str(), data);
+            bufferMap.emplace(bufferInfo["name"], std::unique_ptr<Buffer>(buffer));
+        }
+
+        // Create passes
+        for (auto passInfo: passes) {
+            std::vector<ResourceBinding> resource;
+            std::string shader = passInfo["shader"];
+            std::array<VkDeviceSize, 3> dispatch = passInfo["dispatch"];
+            std::transform(passInfo["resource"].begin(), passInfo["resource"].end(), std::back_inserter(resource), &ResourceBinding::deserialize);
+            passList.emplace_back(shader, resource, dispatch);
+        }
+    }
+
+    void Core::runScript() {
+
+        // Tick logic
+        for (const auto& pass: passList) {
+            auto pipeline = pipelineMap[pass.shader].get();
+
+            for (const auto& buffer: pass.resource) {
+                pipeline->bindBuffer(buffer.set, buffer.binding, bufferMap[buffer.name].get());
+            }
+            pipeline->tick();
+        }
+
+        // Tick compute
+        for (const auto& pass: passList) {
+            auto pipeline = pipelineMap[pass.shader].get();
+
+            tick(pipeline);
+        }
+
+        // Wait for end
+        idle();
+    }
+}

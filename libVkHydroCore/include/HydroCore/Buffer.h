@@ -6,6 +6,7 @@
 #define VKHYDROCORE_BUFFER_H
 
 #include <stdexcept>
+#include <utility>
 #include <vulkan/vulkan.h>
 #include "config.h"
 
@@ -34,12 +35,14 @@ namespace NextHydro {
         const VkDevice&     m_device;
 
     public:
+        std::string         name;
         VkDeviceSize        size           = 0;
         VkBuffer            buffer         = VK_NULL_HANDLE;
         VkDeviceMemory      memory         = VK_NULL_HANDLE;
+        VkDescriptorBufferInfo descriptorBufferInfo = {};
 
-        Buffer(const VkDevice& device, const VkPhysicalDevice& physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
-                : m_device(device), size(size)
+        Buffer(const VkDevice& device, std::string name, const VkPhysicalDevice& physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
+                : m_device(device), name(std::move(name)), size(size)
         {
             create(physicalDevice, usage, properties);
         }
@@ -61,6 +64,18 @@ namespace NextHydro {
             auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
             memcpy(data.data(), mappedMemory.mappedData, static_cast<size_t>(size));
         }// auto unmap
+
+        VkDescriptorBufferInfo& getDescriptorBufferInfo(VkDeviceSize offset = 0, VkDeviceSize range = 0) {
+
+            descriptorBufferInfo.offset = 0;
+            descriptorBufferInfo.range = size;
+            if (offset)
+                descriptorBufferInfo.offset = offset;
+            if (range && range <= size)
+                descriptorBufferInfo.range = range;
+
+            return descriptorBufferInfo;
+        }
 
     private:
 
@@ -108,6 +123,12 @@ namespace NextHydro {
             }
 
             vkBindBufferMemory(m_device, buffer, memory, 0);
+
+            descriptorBufferInfo = {
+                .buffer = buffer,
+                .offset = 0,
+                .range = size
+            };
         }
     };
 }

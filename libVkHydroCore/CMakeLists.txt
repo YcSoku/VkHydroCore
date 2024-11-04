@@ -6,7 +6,7 @@ project(${PROJECT_NAME})
 
 # Set variables
 set(CMAKE_CXX_STANDARD 20)
-set(ENABLE_VALIDATION_LAYER TRUE)
+set(ENABLE_VALIDATION_LAYER FALSE)
 set(RESOURCE_DIR "${CMAKE_SOURCE_DIR}/res")
 set(SHADER_SOURCE_DIR "${RESOURCE_DIR}/shaders")
 set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -14,8 +14,14 @@ set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(SHADER_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 set(INCLUDE_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 
+set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+
 set(GOOGLE_GIT "https://github.com/google")
 set(KHRONOS_GIT "https://github.com/KhronosGroup")
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(ENABLE_VALIDATION_LAYER TRUE)
+endif()
 
 # Vulkan
 find_package(Vulkan)
@@ -54,17 +60,30 @@ add_custom_target(CompileShaders
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.h.in
         ${INCLUDE_OUTPUT_DIR}/config.h)
 
+# spirv-reflect
+OPTION(SPIRV_REFLECT_EXECUTABLE     "Build spirv-reflect executable" OFF)
+OPTION(SPIRV_REFLECT_STATIC_LIB     "Build a SPIRV-Reflect static library" ON)
+FetchContent_Declare(
+        SPIRV-Reflect
+        GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Reflect.git
+        GIT_TAG main
+)
+FetchContent_MakeAvailable(SPIRV-Reflect)
+list(APPEND LIBS spirv-reflect-static)
+
 # spirv-tools
 FetchContent_Declare(
         spirv-tools
         GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
-        GIT_TAG 44d72a9b36702f093dd20815561a56778b2d181e  # 使用 shaderc 需要的版本
+        GIT_TAG 44d72a9b36702f093dd20815561a56778b2d181e
 )
 FetchContent_Declare(
         spirv-headers
         GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
         GIT_TAG 1feaf4414eb2b353764d01d88f8aa4bcc67b60db
 )
+
+#glslang
 FetchContent_Declare(
         glslang
         GIT_REPOSITORY "${KHRONOS_GIT}/glslang.git"

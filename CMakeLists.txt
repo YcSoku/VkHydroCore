@@ -28,7 +28,6 @@ file(GLOB_RECURSE CPP_FILES ${SOURCE_DIR}/*.cpp)
 add_executable(${PROJECT_NAME}
         ${CPP_FILES}
 )
-
 target_link_libraries(${PROJECT_NAME}
         PRIVATE
         ${LIBS}
