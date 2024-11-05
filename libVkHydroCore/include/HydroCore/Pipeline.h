@@ -43,17 +43,20 @@ using Json = nlohmann::json;
 namespace fs = std::filesystem;
 namespace NextHydro {
 
-    static std::vector<uint32_t> compileGLSLtoSPIRV(const std::string& glslCode, shaderc_shader_kind shaderType) {
+    static std::vector<uint32_t> compileGLSLtoSPIRV(const std::string& glslCode, shaderc_shader_kind shaderType, bool debugInfo = false) {
         shaderc::Compiler compiler;
         shaderc::CompileOptions options;
 
         options.SetOptimizationLevel(shaderc_optimization_level_size);
+        if (debugInfo) options.SetGenerateDebugInfo();
+        options.SetTargetSpirv(shaderc_spirv_version_1_5);
+        options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
 
         shaderc::CompilationResult result = compiler.CompileGlslToSpv(
                 glslCode.c_str(),
                 glslCode.size(),
                 shaderType,
-                "shader.glsl",
+                "shader.comp",
                 options
         );
 
@@ -86,16 +89,21 @@ namespace NextHydro {
     private:
         const VkDevice&         m_device;
     public:
-        ReflectShaderModule     reflector;
+        ReflectShaderModule*    reflector;
         VkShaderModule          module      = VK_NULL_HANDLE;
 
-        ShaderModule(const VkDevice& device, const std::vector<uint32_t>& spirvCode)
-                : m_device(device), reflector(ReflectShaderModule(spirvCode))
+        ShaderModule(const VkDevice& device, const std::string& glslCode)
+                : m_device(device)
         {
+            auto spirvCode = compileGLSLtoSPIRV(glslCode, shaderc_compute_shader);
+            auto spirvCodeDebug = compileGLSLtoSPIRV(glslCode, shaderc_compute_shader, true);
+            reflector = new ReflectShaderModule(spirvCodeDebug);
             createShaderModule(spirvCode);
         }
 
         ~ShaderModule() {
+
+            delete reflector;
             if (module != VK_NULL_HANDLE) {
                 vkDestroyShaderModule(m_device, module, nullptr);
             }
@@ -104,26 +112,26 @@ namespace NextHydro {
         VkPipelineShaderStageCreateInfo getShaderStageCreateInfo() {
             return {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                    .stage = static_cast<VkShaderStageFlagBits>(reflector.prototypeModule.shader_stage),
+                    .stage = static_cast<VkShaderStageFlagBits>(reflector->prototypeModule.shader_stage),
                     .module = module,
-                    .pName = reflector.prototypeModule.entry_point_name
+                    .pName = reflector->prototypeModule.entry_point_name
             };
         }
 
         void generateDescriptorSetLayout(std::vector<VkDescriptorSetLayout>& descriptorSetLayout) {
 
-            descriptorSetLayout.resize(reflector.prototypeModule.descriptor_set_count);
-            for (size_t i = 0; i < reflector.prototypeModule.descriptor_set_count; ++i) {
-                auto binding_count = reflector.prototypeModule.descriptor_sets[i].binding_count;
+            descriptorSetLayout.resize(reflector->prototypeModule.descriptor_set_count);
+            for (size_t i = 0; i < reflector->prototypeModule.descriptor_set_count; ++i) {
+                auto binding_count = reflector->prototypeModule.descriptor_sets[i].binding_count;
                 auto bindingInfo = std::vector<VkDescriptorSetLayoutBinding>(binding_count);
 
                 for (size_t j = 0; j < binding_count; ++j) {
-                    auto binding = reflector.prototypeModule.descriptor_sets[i].bindings[j];
+                    auto binding = reflector->prototypeModule.descriptor_sets[i].bindings[j];
                     bindingInfo[j] = VkDescriptorSetLayoutBinding{
                             .binding = binding->binding,
                             .descriptorType = static_cast<VkDescriptorType>(binding->descriptor_type),
                             .descriptorCount = binding->count,
-                            .stageFlags = reflector.prototypeModule.shader_stage,
+                            .stageFlags = reflector->prototypeModule.shader_stage,
                             .pImmutableSamplers = nullptr
                     };
                 }
@@ -136,7 +144,54 @@ namespace NextHydro {
                     throw std::runtime_error("failed to create compute descriptor set layout!");
                 }
             }
+        }
 
+        [[nodiscard]] BufferMemory* fillUniformBlock(const std::string& blockName, const Json& json) const {
+
+            SpvReflectBlockVariable* block;
+            const auto bindings = reflector->prototypeModule.descriptor_bindings;
+            const size_t bindingCount = reflector->prototypeModule.descriptor_binding_count;
+            for (size_t i = 0; i < bindingCount; ++i) {
+                block = &bindings[i].block;
+                if(spvReflectBlockVariableTypeName(block) == blockName) {
+                    break;
+                }
+            }
+
+            auto buffer = new BufferMemory(block->size);
+            const auto& blocksInfo = json["block"];
+
+            for(size_t i = 0; i < block->member_count; ++i) {
+                const auto& blockInfo = blocksInfo[i];
+                const auto& member = block->members[i];
+
+                void* begin = (char*)buffer->bufferMemory + member.offset;
+                switch (type_map[blockInfo["type"].get<std::string>()]) {
+                    case 0: { // f32
+                        auto value = blockInfo["data"].get<float_t>();
+                        std::memcpy(begin, &value, sizeof(float_t));
+                        break;
+                    }
+                    case 1: { // vec2
+                        auto value = blockInfo["data"].get<std::array<float_t, 2>>();
+                        std::memcpy(begin, &value, sizeof(float_t) * 2);
+                        break;
+                    }
+                    case 2: { // vec3
+                        auto value = blockInfo["data"].get<std::array<float_t, 3>>();
+                        std::memcpy(begin, &value, sizeof(float_t) * 3);
+                        break;
+                    }
+                    case 3: { // vec4
+                        auto value = blockInfo["data"].get<std::array<float_t, 4>>();
+                        std::memcpy(begin, &value, sizeof(float_t) * 4);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            return buffer;
         }
 
     private:
@@ -160,6 +215,7 @@ namespace NextHydro {
 
     public:
         std::string                                 name;
+        size_t                                      commandBufferIndex      =           0;
         VkPipeline                                  pipeline                =           VK_NULL_HANDLE;
         VkPipelineLayout                            pipelineLayout          =           VK_NULL_HANDLE;
         VkDescriptorPool                            descriptorPool          =           VK_NULL_HANDLE;
@@ -206,6 +262,9 @@ namespace NextHydro {
 
     class ComputePipeline : public IPipeline {
     public:
+        ShaderModule* computeShaderModule = nullptr;
+
+    public:
         ComputePipeline(const VkDevice& device, const char* name, const char *glslCode)
                 : IPipeline(device, name)
         {
@@ -223,15 +282,18 @@ namespace NextHydro {
             vkUpdateDescriptorSets(m_device, descriptorSetWrite.size(), descriptorSetWrite.data(), 0, nullptr);
         }
 
+        ~ComputePipeline() {
+            delete computeShaderModule;
+        }
+
     private:
         void create(const char *glslCode) {
 
-            // Compile to Spir-V code and build shader module
-            auto spirvCode = compileGLSLtoSPIRV(glslCode, shaderc_compute_shader);
-            ShaderModule computeShaderModule(m_device, spirvCode);
+            // Build shader module
+            computeShaderModule = new ShaderModule(m_device, glslCode);
 
             // Generate descriptor set layout for pipeline from shader module
-            computeShaderModule.generateDescriptorSetLayout(descriptorSetLayout);
+            computeShaderModule->generateDescriptorSetLayout(descriptorSetLayout);
 
             // Create pipeline layout
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
@@ -246,7 +308,7 @@ namespace NextHydro {
             // Create pipeline
             VkComputePipelineCreateInfo pipelineInfo = {
                     .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                    .stage = computeShaderModule.getShaderStageCreateInfo(),
+                    .stage = computeShaderModule->getShaderStageCreateInfo(),
                     .layout = pipelineLayout
             };
             if (vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
@@ -255,10 +317,12 @@ namespace NextHydro {
 
             // Generate descriptor pool
             // Count all bindings
+            const auto& reflector = computeShaderModule->reflector->prototypeModule;
             uint32_t poolSizeCount = 0;
             uint32_t storageBufferNum = 0;
-            auto bindingCount = computeShaderModule.reflector.prototypeModule.descriptor_binding_count;
-            const auto& bindings = computeShaderModule.reflector.prototypeModule.descriptor_bindings;
+            uint32_t uniformBufferNum = 0;
+            uint32_t bindingCount = reflector.descriptor_binding_count;
+            const auto& bindings = reflector.descriptor_bindings;
 
             for(size_t i = 0; i < bindingCount; ++i) {
                 switch (bindings[i].descriptor_type) {
@@ -266,13 +330,16 @@ namespace NextHydro {
                         if (storageBufferNum == 0) poolSizeCount ++;
                         storageBufferNum ++;
                         break;
+                    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                        if (uniformBufferNum == 0) poolSizeCount ++;
+                        uniformBufferNum ++;
+                        break;
                     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
                     case SPV_REFLECT_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
@@ -287,10 +354,14 @@ namespace NextHydro {
                         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                         .descriptorCount = storageBufferNum
                 };
+            if (uniformBufferNum) poolSizes[index++] = {
+                        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                        .descriptorCount = uniformBufferNum
+                };
 
             VkDescriptorPoolCreateInfo poolInfo = {
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                    .maxSets = computeShaderModule.reflector.prototypeModule.descriptor_set_count,
+                    .maxSets = reflector.descriptor_set_count,
                     .poolSizeCount = poolSizeCount,
                     .pPoolSizes = poolSizes.data(),
             };
@@ -307,7 +378,7 @@ namespace NextHydro {
                     .pSetLayouts = descriptorSetLayout.data()
             };
 
-            descriptorSets.resize(computeShaderModule.reflector.prototypeModule.descriptor_set_count);
+            descriptorSets.resize(reflector.descriptor_set_count);
             if (vkAllocateDescriptorSets(m_device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
                 throw std::runtime_error("failed to allocate descriptor sets!");
             }

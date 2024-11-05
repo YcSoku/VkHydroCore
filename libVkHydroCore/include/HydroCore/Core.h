@@ -45,27 +45,30 @@ namespace NextHydro {
     };
 
     struct ComputePass {
-        std::string                  shader;
-        std::vector<ResourceBinding> resource;
-        std::array<VkDeviceSize, 3>  dispatch;
+        std::string                     shader;
+        std::vector<ResourceBinding>    resource;
+        std::array<uint32_t, 3>         groupCounts;
 
-        ComputePass(std::string& shader, std::vector<ResourceBinding>& resource, std::array<VkDeviceSize, 3>& dispatch)
-            : shader(std::move(shader)), resource(std::move(resource)), dispatch(dispatch)
+        ComputePass(std::string& shader, std::vector<ResourceBinding>& resource, std::array<uint32_t, 3>& groupCounts)
+            : shader(std::move(shader)), resource(std::move(resource)), groupCounts(groupCounts)
         {}
     };
 
     class Core {
 
     public:
-        VkInstance                          instance                    = VK_NULL_HANDLE;
-        VkPhysicalDevice                    physicalDevice              = VK_NULL_HANDLE;
-        VkDevice                            device                      = VK_NULL_HANDLE;
-        VkQueue                             computeQueue                = VK_NULL_HANDLE;
-        VkCommandPool                       commandPool                 = VK_NULL_HANDLE;
-        VkDescriptorPool                    storageDescriptorPool       = VK_NULL_HANDLE;
-        VkCommandBuffer                     computeCommandBuffer        = VK_NULL_HANDLE;
-        VkSemaphore                         computeFinishedSemaphores   = VK_NULL_HANDLE;
-        VkFence                             computeInFlightFences       = VK_NULL_HANDLE;
+        VkInstance                          instance                    =   VK_NULL_HANDLE;
+        VkPhysicalDevice                    physicalDevice              =   VK_NULL_HANDLE;
+        VkDevice                            device                      =   VK_NULL_HANDLE;
+        VkQueue                             computeQueue                =   VK_NULL_HANDLE;
+        VkCommandPool                       commandPool                 =   VK_NULL_HANDLE;
+        VkDescriptorPool                    storageDescriptorPool       =   VK_NULL_HANDLE;
+        VkSemaphore                         computeFinishedSemaphores   =   VK_NULL_HANDLE;
+        VkFence                             computeInFlightFences       =   VK_NULL_HANDLE;
+        uint32_t                            currentCommandBufferIndex   =   0;
+        uint32_t                            currentFenceIndex           =   0;
+        std::vector<VkCommandBuffer>        commandBuffers;
+        std::vector<VkFence>                fences;
 
         std::vector<ComputePass>                                            passList;
         std::unordered_map<std::string, std::unique_ptr<Buffer>>            bufferMap;
@@ -78,15 +81,22 @@ namespace NextHydro {
         Core();
         ~Core();
 
+        void                                commandBegin();
+        void                                dispatch(const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
+        void                                commandEnd();
         void                                runScript();
+        void                                preheat();
+        void                                submit();
         void                                idle() const;
         void                                parseScript(const char* path);
-        void                                tick(ComputePipeline* computePipeline);
+//        void                                tick(ComputePipeline *computePipeline, VkDeviceSize x, VkDeviceSize y, VkDeviceSize z);
         void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
 
         [[nodiscard]] Buffer                createStagingBuffer(VkDeviceSize size) const;
         ComputePipeline*                    createComputePipeline(const char *shaderPath) const;
 
+        void                                createUniformBuffer(Buffer*& uniformBuffer, const Json &json, const Json& dataJson);
+        BufferMemory                        fillUniformBlockByJson(const std::string& blockName, const Json& json, const Json& dataJson);
         template<typename T>
         Buffer*                             createStorageBuffer(const char* name, const std::vector<T>& data) {
             VkDeviceSize bufferSize = data.size() * sizeof(T);
@@ -105,6 +115,7 @@ namespace NextHydro {
         }
 
     private:
+        void                                createFence();
         void                                createInstance();
         void                                createCommandPool();
         void                                createSyncObjects();
@@ -112,8 +123,8 @@ namespace NextHydro {
         void                                setupDebugMessenger();
         void                                createLogicalDevice();
         void                                createDescriptorPool();
-        void                                createComputeCommandBuffer();
-        void                                recordComputeCommandBuffer(const ComputePipeline& computePipeline) const;
+        size_t                              createCommandBuffer();
+//        void                                recordComputeCommandBuffer(const ComputePipeline& computePipeline) const;
     };
 }
 #endif //VKHYDROCORE_CORE_H

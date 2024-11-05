@@ -11,6 +11,7 @@
 #include "config.h"
 
 namespace NextHydro {
+
     struct ScopedMemoryMapping {
 
         const VkDevice&           device;
@@ -52,6 +53,13 @@ namespace NextHydro {
         }
 
         template<typename T>
+        void writeData(const T& data) {
+
+            auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
+            memcpy(mappedMemory.mappedData, data, static_cast<size_t>(size));
+        } // auto unmap
+
+        template<typename T>
         void writeData(const std::vector<T>& data) {
 
             auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
@@ -63,7 +71,7 @@ namespace NextHydro {
             data.resize(size / sizeof(T));
             auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
             memcpy(data.data(), mappedMemory.mappedData, static_cast<size_t>(size));
-        }// auto unmap
+        } // auto unmap
 
         VkDescriptorBufferInfo& getDescriptorBufferInfo(VkDeviceSize offset = 0, VkDeviceSize range = 0) {
 

@@ -238,7 +238,6 @@ namespace NextHydro {
         pickPhysicalDevice();
         createLogicalDevice();
         createCommandPool();
-        createComputeCommandBuffer();
         createSyncObjects();
     }
 
@@ -462,7 +461,7 @@ namespace NextHydro {
         }
     }
 
-    void Core::createComputeCommandBuffer() {
+    size_t Core::createCommandBuffer() {
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -470,26 +469,47 @@ namespace NextHydro {
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
-        if (vkAllocateCommandBuffers(device, &allocInfo, &computeCommandBuffer) != VK_SUCCESS) {
+        VkCommandBuffer commandBuffer;
+        if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate compute command buffers!");
         }
+        commandBuffers.emplace_back(commandBuffer);
+        return commandBuffers.size() - 1;
     }
 
-    void Core::recordComputeCommandBuffer(const ComputePipeline& computePipeline) const {
+    void Core::commandBegin() {
+        if (currentCommandBufferIndex == commandBuffers.size()) createCommandBuffer();
 
+        const auto& commandBuffer = commandBuffers[currentCommandBufferIndex];
+        vkResetCommandBuffer(commandBuffer, 0);
         VkCommandBufferBeginInfo beginInfo = {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
-        if (vkBeginCommandBuffer(computeCommandBuffer, &beginInfo) != VK_SUCCESS) {
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording compute command buffer!");
         }
+    }
 
-        vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
-        vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, computePipeline.descriptorSets.size(), computePipeline.descriptorSets.data(), 0,nullptr);
+    void Core::dispatch(const ComputePipeline* pipeline, const std::array<uint32_t, 3> groupCounts) {
 
-        vkCmdDispatch(computeCommandBuffer, 1, 1, 1);
+        const auto & commandBuffer = commandBuffers[currentCommandBufferIndex];
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
+        vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline->pipelineLayout,
+                0,
+                pipeline->descriptorSets.size(),
+                pipeline->descriptorSets.data(),
+                0,
+                nullptr
+        );
+        vkCmdDispatch(commandBuffer, groupCounts[0], groupCounts[1], groupCounts[2]);
+    }
 
-        if (vkEndCommandBuffer(computeCommandBuffer) != VK_SUCCESS) {
+    void Core::commandEnd() {
+
+        if (vkEndCommandBuffer(commandBuffers[currentCommandBufferIndex++]) != VK_SUCCESS) {
             throw std::runtime_error("failed to record compute command buffer!");
         }
     }
@@ -510,29 +530,115 @@ namespace NextHydro {
         }
     }
 
-    void Core::tick(ComputePipeline* computePipeline) {
+    void Core::createFence() {
 
-        vkWaitForFences(device, 1, &computeInFlightFences, VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &computeInFlightFences);
-
-        vkResetCommandBuffer(computeCommandBuffer, 0);
-        recordComputeCommandBuffer(*computePipeline);
-
-        VkSubmitInfo submitInfo = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &computeCommandBuffer,
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &computeFinishedSemaphores
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
         };
 
-        if (vkQueueSubmit(computeQueue, 1, &submitInfo, computeInFlightFences) != VK_SUCCESS) {
-            throw std::runtime_error("failed to submit compute command buffer!");
+        VkFence fence;
+        if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create fence object!");
         }
+        fences.emplace_back(fence);
     }
 
     void Core::idle() const {
         vkDeviceWaitIdle(device);
+    }
+
+    BufferMemory Core::fillUniformBlockByJson(const std::string &blockName, const Json &json, const Json& blocksInfo) {
+
+        std::string name = json["name"];
+        std::string affiliation = json["affiliation"][0];
+        const auto pipeline = pipelineMap[affiliation].get();
+        const auto& reflector = pipeline->computeShaderModule->reflector->prototypeModule;
+
+        SpvReflectBlockVariable* block;
+        const auto bindings = reflector.descriptor_bindings;
+        const size_t bindingCount = reflector.descriptor_binding_count;
+        for (size_t i = 0; i < bindingCount; ++i) {
+            block = &bindings[i].block;
+            if(spvReflectBlockVariableTypeName(block) == blockName) {
+                break;
+            }
+        }
+
+        auto buffer = BufferMemory(block->size);
+
+        for(size_t i = 0; i < block->member_count; ++i) {
+            const auto& blockInfo = blocksInfo[i];
+            const auto& member = block->members[i];
+
+            void* begin = (char*)buffer.bufferMemory + member.offset;
+            switch (type_map[blockInfo["type"].get<std::string>()]) {
+                case 0: { // f32
+                    auto value = blockInfo["data"].get<float_t>();
+                    std::memcpy(begin, &value, sizeof(float_t));
+                    break;
+                }
+                case 1: { // vec2
+                    auto value = blockInfo["data"].get<std::array<float_t, 2>>();
+                    std::memcpy(begin, &value, sizeof(float_t) * 2);
+                    break;
+                }
+                case 2: { // vec3
+                    auto value = blockInfo["data"].get<std::array<float_t, 3>>();
+                    std::memcpy(begin, &value, sizeof(float_t) * 3);
+                    break;
+                }
+                case 3: { // vec4
+                    auto value = blockInfo["data"].get<std::array<float_t, 4>>();
+                    std::memcpy(begin, &value, sizeof(float_t) * 4);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+        return buffer;
+    }
+
+    void Core::createUniformBuffer(Buffer*& uniformBuffer, const Json &json, const Json& dataJson) {
+
+        auto name = json["name"].get<std::string>();
+        auto memory = fillUniformBlockByJson(name, json, dataJson);
+
+        auto stagingBuffer = createStagingBuffer(memory.size);
+        stagingBuffer.writeData(memory.bufferMemory);
+
+        uniformBuffer = new Buffer(device, name, physicalDevice,
+                                   memory.size,
+                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        );
+        copyBuffer(stagingBuffer.buffer, uniformBuffer->buffer, memory.size);
+    }
+
+    void Core::preheat() {
+        if (currentFenceIndex == fences.size()) createFence();
+        const auto& fence = fences[currentFenceIndex];
+
+        vkResetFences(device, 1, &fence);
+    }
+
+    void Core::submit() {
+        const auto& fence = fences[currentFenceIndex++];
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = currentCommandBufferIndex,
+                .pCommandBuffers = commandBuffers.data(),
+        };
+
+        if (vkQueueSubmit(computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit compute command buffer!");
+        }
+
+        currentCommandBufferIndex = 0;
+        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        currentFenceIndex = 0;
     }
 
     void Core::parseScript(const char *path) {
@@ -541,8 +647,10 @@ namespace NextHydro {
         Json script = readJsonFile(path);
 
         // Get assets
+        const auto& bufferData = script["bufferData"];
+        const auto& uniforms = script["uniforms"];
+        const auto& storages = script["storages"];
         const auto& shaders = script["shaders"];
-        const auto& buffers = script["buffers"];
         const auto& passes = script["passes"];
 
         // Create pipelines
@@ -552,21 +660,32 @@ namespace NextHydro {
             pipelineMap.emplace(name, std::make_unique<ComputePipeline>(device, name.c_str(), glslCode.c_str()));
         }
 
-        // Create buffers
-        for (const auto& bufferInfo: buffers) {
+        // Create uniforms
+        for (const auto& uniformInfo: uniforms ) {
+            Buffer* buffer = nullptr;
+            std::string name = uniformInfo["name"];
+            std::string dataName = uniformInfo["data"];
+            const auto& dataJson = bufferData[dataName]["data"];
+            createUniformBuffer(buffer, uniformInfo, dataJson);
+            bufferMap.emplace(name, std::unique_ptr<Buffer>(buffer));
+        }
+
+        // Create storages
+        for (const auto& bufferInfo: storages) {
             std::string name = bufferInfo["name"];
-            std::vector<float> data = bufferInfo["data"];
+            std::string dataName = bufferInfo["data"];
+            std::vector<float_t> data = bufferData[dataName]["data"];
             auto buffer = createStorageBuffer(name.c_str(), data);
-            bufferMap.emplace(bufferInfo["name"], std::unique_ptr<Buffer>(buffer));
+            bufferMap.emplace(name, std::unique_ptr<Buffer>(buffer));
         }
 
         // Create passes
-        for (auto passInfo: passes) {
+        for (const auto& passInfo: passes) {
             std::vector<ResourceBinding> resource;
             std::string shader = passInfo["shader"];
-            std::array<VkDeviceSize, 3> dispatch = passInfo["dispatch"];
+            std::array<uint32_t , 3> groupCounts = passInfo["groupCounts"];
             std::transform(passInfo["resource"].begin(), passInfo["resource"].end(), std::back_inserter(resource), &ResourceBinding::deserialize);
-            passList.emplace_back(shader, resource, dispatch);
+            passList.emplace_back(shader, resource, groupCounts);
         }
     }
 
@@ -583,10 +702,19 @@ namespace NextHydro {
         }
 
         // Tick compute
-        for (const auto& pass: passList) {
-            auto pipeline = pipelineMap[pass.shader].get();
+        std::vector<float> step;
+        const auto flagBuffer = bufferMap["stepBuffer"].get();
+        while (true) {
+            preheat();
+            commandBegin();
+            for (const auto& pass: passList) {
+                dispatch(pipelineMap[pass.shader].get(), pass.groupCounts);
+            }
+            commandEnd();
+            submit();
 
-            tick(pipeline);
+            flagBuffer->readData(step);
+            if (step[0] == 100000.0) break;
         }
 
         // Wait for end
