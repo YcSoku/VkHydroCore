@@ -1,4 +1,5 @@
 #include <vector>
+#include <chrono>
 #include <iostream>
 #include "HydroCore/Core.h"
 
@@ -14,17 +15,26 @@ int main() {
 
     // Parse and run script
     core->parseScript(jsonPath.c_str());
+
+    auto start = std::chrono::high_resolution_clock::now();
+
     core->runScript();
 
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration = end - start;
+    std::cout << "Run time: " << duration.count() << "ms" << std::endl;
+
     // Check result
-    auto buffer = core->bufferMap["buffer1"].get();
+    auto buffer = core->bufferMap["scalarBuffer"].get();
     std::vector<float_t> outputArray;
     buffer->readData(outputArray);
 
     std::cout << "\n==================== Computation Result ====================" << std::endl;
+    outputArray.resize(3);
     for (const auto& value : outputArray) {
         std::cout << value << std::endl;
     }
+
 
     return 0;
 }

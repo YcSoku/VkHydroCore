@@ -19,6 +19,8 @@ namespace NextHydro {
     // Helpers ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     std::vector<const char*> deviceExtensions = {
+            "VK_KHR_portability_subset",
+            "VK_EXT_shader_atomic_float"
     };
 
     std::vector<char> readFile(const char* filename) {
@@ -128,6 +130,7 @@ namespace NextHydro {
 
         auto extensions = std::vector<const char*>();
         extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+//        extensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME);
 
 #ifdef ENABLE_VALIDATION_LAYER
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -194,15 +197,23 @@ namespace NextHydro {
         VkPhysicalDeviceProperties deviceProperties;
         VkPhysicalDeviceFeatures deviceFeatures;
 
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
+        atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.pNext = &atomicFloatFeatures;
+
+
         vkGetPhysicalDeviceProperties(device, &deviceProperties);
         vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+        vkGetPhysicalDeviceFeatures2(device, &deviceFeatures2);
 
         int score = 1;
 
         if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             score += 1000;
         }
-        if (!deviceFeatures.shaderFloat64) {
+        if (deviceFeatures.shaderFloat64) {
             score += 1000;
         }
         bool extensionsSupported = checkDeviceExtensionSupport(device);
@@ -268,7 +279,7 @@ namespace NextHydro {
                 .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
                 .pEngineName = "VKHydroCoreEngine",
                 .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                .apiVersion = VK_API_VERSION_1_3
+                .apiVersion = VK_API_VERSION_1_2
         };
 
         auto extensions = getRequiredExtensions();
@@ -351,14 +362,23 @@ namespace NextHydro {
             queueCreateInfos.emplace_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures {};
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
+        atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+        atomicFloatFeatures.shaderBufferFloat32AtomicAdd = VK_TRUE;
+        atomicFloatFeatures.shaderBufferFloat32Atomics = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.pNext = &atomicFloatFeatures;
+
         VkDeviceCreateInfo createInfo = {
                 .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                .pNext = &deviceFeatures2,
                 .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
                 .pQueueCreateInfos = queueCreateInfos.data(),
                 .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
                 .ppEnabledExtensionNames = deviceExtensions.data(),
-                .pEnabledFeatures = &deviceFeatures,
+//                .pEnabledFeatures = &deviceFeatures
         };
 
 #ifdef ENABLE_VALIDATION_LAYER
@@ -477,6 +497,91 @@ namespace NextHydro {
         return commandBuffers.size() - 1;
     }
 
+    void Core::createSyncObjects() {
+
+        VkSemaphoreCreateInfo semaphoreInfo = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+        };
+
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores) != VK_SUCCESS || vkCreateFence(device, &fenceInfo, nullptr, &computeInFlightFences) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create compute synchronization objects for a frame!");
+        }
+    }
+
+    void Core::createFence() {
+
+        VkFenceCreateInfo fenceInfo = {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+
+        VkFence fence;
+        if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create fence object!");
+        }
+        fences.emplace_back(fence);
+    }
+
+    void Core::idle() const {
+        vkDeviceWaitIdle(device);
+    }
+
+    void Core::createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory) {
+
+        auto stagingBuffer = createStagingBuffer(blockMemory.size);
+        stagingBuffer.writeData(static_cast<void*>(blockMemory.buffer.get()));
+
+        uniformBuffer = new Buffer(device, name, physicalDevice,
+                                   blockMemory.size,
+                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        );
+        copyBuffer(stagingBuffer.buffer, uniformBuffer->buffer, blockMemory.size);
+    }
+
+    void Core::createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory) {
+
+        auto stagingBuffer = createStagingBuffer(blockMemory.size);
+        stagingBuffer.writeData(static_cast<void*>(blockMemory.buffer.get()));
+
+        storageBuffer = new Buffer(device, name, physicalDevice,
+                                   blockMemory.size,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        );
+        copyBuffer(stagingBuffer.buffer, storageBuffer->buffer, blockMemory.size);
+    }
+
+    void Core::preheat() {
+        if (currentFenceIndex == fences.size()) createFence();
+        const auto& fence = fences[currentFenceIndex];
+
+        vkResetFences(device, 1, &fence);
+    }
+
+    void Core::submit() {
+        const auto& fence = fences[currentFenceIndex++];
+
+        VkSubmitInfo submitInfo = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = currentCommandBufferIndex,
+                .pCommandBuffers = commandBuffers.data(),
+        };
+
+        if (vkQueueSubmit(computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit compute command buffer!");
+        }
+
+        currentCommandBufferIndex = 0;
+        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        currentFenceIndex = 0;
+    }
+
     void Core::commandBegin() {
         if (currentCommandBufferIndex == commandBuffers.size()) createCommandBuffer();
 
@@ -514,131 +619,18 @@ namespace NextHydro {
         }
     }
 
-    void Core::createSyncObjects() {
-
-        VkSemaphoreCreateInfo semaphoreInfo = {
-                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-        };
-
-        VkFenceCreateInfo fenceInfo = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-
-        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores) != VK_SUCCESS || vkCreateFence(device, &fenceInfo, nullptr, &computeInFlightFences) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create compute synchronization objects for a frame!");
-        }
-    }
-
-    void Core::createFence() {
-
-        VkFenceCreateInfo fenceInfo = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-
-        VkFence fence;
-        if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create fence object!");
-        }
-        fences.emplace_back(fence);
-    }
-
-    void Core::idle() const {
-        vkDeviceWaitIdle(device);
-    }
-
-    BufferMemory Core::fillUniformBlockByJson(const std::string &blockName, const Json &json, const Json& blocksInfo) {
-
-        std::string name = json["name"];
-        std::string affiliation = json["affiliation"][0];
-        const auto pipeline = pipelineMap[affiliation].get();
-        const auto& reflector = pipeline->computeShaderModule->reflector->prototypeModule;
-
-        SpvReflectBlockVariable* block;
-        const auto bindings = reflector.descriptor_bindings;
-        const size_t bindingCount = reflector.descriptor_binding_count;
-        for (size_t i = 0; i < bindingCount; ++i) {
-            block = &bindings[i].block;
-            if(spvReflectBlockVariableTypeName(block) == blockName) {
-                break;
+    void readData(const Json& json, std::vector<float_t >& data) {
+        if (json.is_array()) {
+            data.reserve(json.size());
+            auto jsonData = json.get<std::vector<float_t>>();
+            data.insert(data.end(), jsonData.begin(), jsonData.end());
+        } else {
+            if(json["length"] == nullptr) {
+                throw std::runtime_error("data resource is not valid");
             }
+            size_t length = json["length"];
+            data.resize(length, 0);
         }
-
-        auto buffer = BufferMemory(block->size);
-
-        for(size_t i = 0; i < block->member_count; ++i) {
-            const auto& blockInfo = blocksInfo[i];
-            const auto& member = block->members[i];
-
-            void* begin = (char*)buffer.bufferMemory + member.offset;
-            switch (type_map[blockInfo["type"].get<std::string>()]) {
-                case 0: { // f32
-                    auto value = blockInfo["data"].get<float_t>();
-                    std::memcpy(begin, &value, sizeof(float_t));
-                    break;
-                }
-                case 1: { // vec2
-                    auto value = blockInfo["data"].get<std::array<float_t, 2>>();
-                    std::memcpy(begin, &value, sizeof(float_t) * 2);
-                    break;
-                }
-                case 2: { // vec3
-                    auto value = blockInfo["data"].get<std::array<float_t, 3>>();
-                    std::memcpy(begin, &value, sizeof(float_t) * 3);
-                    break;
-                }
-                case 3: { // vec4
-                    auto value = blockInfo["data"].get<std::array<float_t, 4>>();
-                    std::memcpy(begin, &value, sizeof(float_t) * 4);
-                    break;
-                }
-                default:
-                    break;
-            }
-        }
-        return buffer;
-    }
-
-    void Core::createUniformBuffer(Buffer*& uniformBuffer, const Json &json, const Json& dataJson) {
-
-        auto name = json["name"].get<std::string>();
-        auto memory = fillUniformBlockByJson(name, json, dataJson);
-
-        auto stagingBuffer = createStagingBuffer(memory.size);
-        stagingBuffer.writeData(memory.bufferMemory);
-
-        uniformBuffer = new Buffer(device, name, physicalDevice,
-                                   memory.size,
-                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-        );
-        copyBuffer(stagingBuffer.buffer, uniformBuffer->buffer, memory.size);
-    }
-
-    void Core::preheat() {
-        if (currentFenceIndex == fences.size()) createFence();
-        const auto& fence = fences[currentFenceIndex];
-
-        vkResetFences(device, 1, &fence);
-    }
-
-    void Core::submit() {
-        const auto& fence = fences[currentFenceIndex++];
-
-        VkSubmitInfo submitInfo = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .commandBufferCount = currentCommandBufferIndex,
-                .pCommandBuffers = commandBuffers.data(),
-        };
-
-        if (vkQueueSubmit(computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-            throw std::runtime_error("failed to submit compute command buffer!");
-        }
-
-        currentCommandBufferIndex = 0;
-        vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
-        currentFenceIndex = 0;
     }
 
     void Core::parseScript(const char *path) {
@@ -647,74 +639,129 @@ namespace NextHydro {
         Json script = readJsonFile(path);
 
         // Get assets
-        const auto& bufferData = script["bufferData"];
+        const auto& dataResource = script["dataResource"];
+        const auto& bufferLayouts = script["bufferLayouts"];
         const auto& uniforms = script["uniforms"];
         const auto& storages = script["storages"];
         const auto& shaders = script["shaders"];
         const auto& passes = script["passes"];
+        const auto& flow = script["flow"];
 
         // Create pipelines
         for (const auto& shaderInfo: shaders) {
             auto name = shaderInfo["name"].get<std::string>();
             auto glslCode = readShaderFile(shaderInfo["path"].get<std::string>());
-            pipelineMap.emplace(name, std::make_unique<ComputePipeline>(device, name.c_str(), glslCode.c_str()));
+            pipelineMap.emplace(name, std::make_shared<ComputePipeline>(device, name.c_str(), glslCode.c_str()));
         }
 
         // Create uniforms
         for (const auto& uniformInfo: uniforms ) {
             Buffer* buffer = nullptr;
             std::string name = uniformInfo["name"];
-            std::string dataName = uniformInfo["data"];
-            const auto& dataJson = bufferData[dataName]["data"];
-            createUniformBuffer(buffer, uniformInfo, dataJson);
-            bufferMap.emplace(name, std::unique_ptr<Buffer>(buffer));
+            Json layout = bufferLayouts[uniformInfo["layout"]];
+            std::vector<std::string> typeList = layout["type"];
+            std::vector<std::string> dataNames = layout["data"];
+            size_t totalSize = 0;
+            std::vector<float_t> totalData;
+            for (const auto& dataName: dataNames) {
+                totalSize += dataResource[dataName].size();
+            }
+            totalData.reserve(totalSize);
+            for (const auto& dataName : dataNames) {
+                std::vector<float_t> data;
+                readData(dataResource[dataName], data);
+                totalData.insert(totalData.end(), data.begin(), data.end());
+            }
+            Block block(typeList, totalData);
+            createUniformBuffer(name, buffer, block);
+            bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
         }
 
         // Create storages
-        for (const auto& bufferInfo: storages) {
-            std::string name = bufferInfo["name"];
-            std::string dataName = bufferInfo["data"];
-            std::vector<float_t> data = bufferData[dataName]["data"];
-            auto buffer = createStorageBuffer(name.c_str(), data);
-            bufferMap.emplace(name, std::unique_ptr<Buffer>(buffer));
+        for (const auto& storageInfo: storages) {
+            Buffer* buffer = nullptr;
+            std::string name = storageInfo["name"];
+            Json layout = bufferLayouts[storageInfo["layout"]];
+            std::vector<std::string> typeList = layout["type"];
+            std::vector<std::string> dataNames = layout["data"];
+            size_t totalSize = 0;
+            std::vector<float_t> totalData;
+            for (const auto& dataName: dataNames) {
+                totalSize += dataResource[dataName].size();
+            }
+            totalData.reserve(totalSize);
+            for (const auto& dataName : dataNames) {
+                std::vector<float_t> data;
+                readData(dataResource[dataName], data);
+                totalData.insert(totalData.end(), data.begin(), data.end());
+            }
+            Block block(typeList, totalData);
+            createStorageBuffer(name, buffer, block);
+            bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
         }
 
         // Create passes
         for (const auto& passInfo: passes) {
+            std::string name = passInfo["name"];
             std::vector<ResourceBinding> resource;
             std::string shader = passInfo["shader"];
             std::array<uint32_t , 3> groupCounts = passInfo["groupCounts"];
             std::transform(passInfo["resource"].begin(), passInfo["resource"].end(), std::back_inserter(resource), &ResourceBinding::deserialize);
-            passList.emplace_back(shader, resource, groupCounts);
+            passMap.emplace(name, std::make_shared<ComputePass>(shader, resource, groupCounts));
+        }
+
+        // Create flowNodes
+        for (const auto& nodeInfo : flow) {
+            std::vector<std::string> passNames = nodeInfo["passes"];
+            std::vector<std::shared_ptr<ComputePass>> passPointers(passNames.size());
+            for (size_t i = 0; i < passNames.size(); ++i) {
+                passPointers[i] = passMap[passNames[i]];
+            }
+            switch (nodeInfo["type"].get<size_t>()) {
+                case 0b01:{
+                    size_t count = nodeInfo["count"];
+                    flowNodeList.emplace_back(std::make_unique<IterableFlowNode>(passPointers, count));
+                    break;
+                }
+                case 0b11: {
+                    std::shared_ptr<Buffer> flagBuffer = bufferMap[nodeInfo["flagBuffer"]];
+                    std::string operation = nodeInfo["operation"];
+                    size_t flagIndex = nodeInfo["flagIndex"];
+                    float_t flag = nodeInfo["flag"];
+                    flowNodeList.emplace_back(std::make_unique<FlagFlowNode>(passPointers, flagBuffer, operation, flagIndex, flag));
+                    break;
+                }
+            }
         }
     }
 
     void Core::runScript() {
 
         // Tick logic
-        for (const auto& pass: passList) {
-            auto pipeline = pipelineMap[pass.shader].get();
+        for (const auto& node : flowNodeList) {
+            for (const auto& pass : node->passes) {
+                auto pipeline = pipelineMap[pass->shader].get();
 
-            for (const auto& buffer: pass.resource) {
-                pipeline->bindBuffer(buffer.set, buffer.binding, bufferMap[buffer.name].get());
+                for (const auto& buffer: pass->resource) {
+                    pipeline->bindBuffer(buffer.set, buffer.binding, bufferMap[buffer.name].get());
+                }
+                pipeline->tick();
             }
-            pipeline->tick();
         }
 
         // Tick compute
         std::vector<float> step;
         const auto flagBuffer = bufferMap["stepBuffer"].get();
-        while (true) {
-            preheat();
-            commandBegin();
-            for (const auto& pass: passList) {
-                dispatch(pipelineMap[pass.shader].get(), pass.groupCounts);
+        for (const auto& node : flowNodeList) {
+            while(node->isComplete()) {
+                preheat();
+                commandBegin();
+                for (const auto& pass: node->passes) {
+                    dispatch(pipelineMap[pass->shader].get(), pass->groupCounts);
+                }
+                commandEnd();
+                submit();
             }
-            commandEnd();
-            submit();
-
-            flagBuffer->readData(step);
-            if (step[0] == 100000.0) break;
         }
 
         // Wait for end

@@ -10,6 +10,7 @@
 #include <optional>
 #include <unordered_map>
 #include <vulkan/vulkan.h>
+#include "Block.h"
 #include "Buffer.h"
 #include "Pipeline.h"
 #include "nlohmann/json.hpp"
@@ -37,9 +38,9 @@ namespace NextHydro {
 
         static ResourceBinding deserialize(const nlohmann::json& json) {
             return ResourceBinding {
-                .set        = json["set"],
-                .binding    = json["binding"],
-                .name       = json["name"]
+                    .set        = json["set"],
+                    .binding    = json["binding"],
+                    .name       = json["name"]
             };
         }
     };
@@ -50,8 +51,77 @@ namespace NextHydro {
         std::array<uint32_t, 3>         groupCounts;
 
         ComputePass(std::string& shader, std::vector<ResourceBinding>& resource, std::array<uint32_t, 3>& groupCounts)
-            : shader(std::move(shader)), resource(std::move(resource)), groupCounts(groupCounts)
+                : shader(std::move(shader)), resource(std::move(resource)), groupCounts(groupCounts)
         {}
+    };
+
+    struct IFlowNode {
+        std::vector<std::shared_ptr<ComputePass>> passes;
+
+        explicit IFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes)
+        : passes(passes)
+        {}
+
+        virtual bool isComplete() = 0;
+        virtual char nodeType() = 0;
+        virtual ~IFlowNode() = default;
+    };
+
+    struct IterableFlowNode : public IFlowNode {
+        size_t count;
+        size_t currentFrame = 0;
+
+        IterableFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes, size_t count)
+                : IFlowNode(passes), count(count)
+        {}
+
+        bool isComplete() override {
+            if (currentFrame ++ <= count)
+                return true;
+            return false;
+        }
+
+        char nodeType() override { return 0b01; }
+    };
+
+    struct FlagFlowNode : public IFlowNode {
+        char type = 0b11;
+        float_t flag;
+        size_t flagIndex;
+        std::function<bool()> op;
+        std::shared_ptr<Buffer> flagBuffer;
+
+        FlagFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, const std::string& operation, size_t _flagIndex, float_t _flag)
+            : IFlowNode(passes), flagBuffer(_flagBuffer), flagIndex(_flagIndex), flag(_flag)
+        {
+
+            if (operation == "less") {
+                op = [this]() { return getData() < flag; };
+            } else if (operation == "lEqual") {
+                op = [this]() { return getData() <= flag; };
+            } else if (operation == "greater") {
+                op = [this]() { return getData() > flag; };
+            } else if (operation == "gEqual") {
+                op = [this]() { return getData() >= flag; };
+            } else {
+                op = [this]() { return getData() == flag; };
+            }
+        }
+
+        [[nodiscard]] float getData() const {
+
+            std::vector<float> step;
+            flagBuffer->readData(step);
+            float currentStep = step[flagIndex];
+            std::cout << step[0] << std::endl;
+            return currentStep;
+        }
+
+        bool isComplete() override {
+            return op();
+        }
+
+        char nodeType() override { return 0b11; }
     };
 
     class Core {
@@ -71,8 +141,10 @@ namespace NextHydro {
         std::vector<VkFence>                fences;
 
         std::vector<ComputePass>                                            passList;
-        std::unordered_map<std::string, std::unique_ptr<Buffer>>            bufferMap;
-        std::unordered_map<std::string, std::unique_ptr<ComputePipeline>>   pipelineMap;
+        std::unordered_map<std::string, std::shared_ptr<ComputePass>>       passMap;
+        std::unordered_map<std::string, std::shared_ptr<Buffer>>            bufferMap;
+        std::unordered_map<std::string, std::shared_ptr<ComputePipeline>>   pipelineMap;
+        std::vector<std::unique_ptr<IFlowNode>>                             flowNodeList;
 
     private:
         VkDebugUtilsMessengerEXT            m_debugMessenger            = VK_NULL_HANDLE;
@@ -95,24 +167,8 @@ namespace NextHydro {
         [[nodiscard]] Buffer                createStagingBuffer(VkDeviceSize size) const;
         ComputePipeline*                    createComputePipeline(const char *shaderPath) const;
 
-        void                                createUniformBuffer(Buffer*& uniformBuffer, const Json &json, const Json& dataJson);
-        BufferMemory                        fillUniformBlockByJson(const std::string& blockName, const Json& json, const Json& dataJson);
-        template<typename T>
-        Buffer*                             createStorageBuffer(const char* name, const std::vector<T>& data) {
-            VkDeviceSize bufferSize = data.size() * sizeof(T);
-
-            auto stagingBuffer = createStagingBuffer(bufferSize);
-            stagingBuffer.writeData(data);
-
-            auto storageBuffer = new Buffer(device, name, physicalDevice,
-                                 bufferSize,
-                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-            );
-            copyBuffer(stagingBuffer.buffer, storageBuffer->buffer, bufferSize);
-
-            return storageBuffer;
-        }
+        void                                createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory);
+        void                                createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory);
 
     private:
         void                                createFence();
