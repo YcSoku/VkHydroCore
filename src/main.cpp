@@ -20,6 +20,7 @@ int main() {
 
     core->runScript();
 
+    std::cout << "\n==================== Computation Complete ====================" << std::endl;
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Run time: " << duration.count() << "ms" << std::endl;

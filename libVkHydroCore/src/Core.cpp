@@ -192,7 +192,7 @@ namespace NextHydro {
         return indices;
     }
 
-    int rateDeviceSuitability(VkPhysicalDevice& device) {
+    int rateDeviceSuitability(VkPhysicalDevice& device, bool& isDiscrete) {
 
         VkPhysicalDeviceProperties deviceProperties;
         VkPhysicalDeviceFeatures deviceFeatures;
@@ -211,6 +211,7 @@ namespace NextHydro {
         int score = 1;
 
         if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            isDiscrete = true;
             score += 1000;
         }
         if (deviceFeatures.shaderFloat64) {
@@ -332,7 +333,7 @@ namespace NextHydro {
 
         std::multimap<int, VkPhysicalDevice> candidates;
         for (auto pDevice: physicalDevices) {
-            int score = rateDeviceSuitability(pDevice);
+            int score = rateDeviceSuitability(pDevice, isDiscrete);
             candidates.insert(std::make_pair(score, pDevice));
         }
 
@@ -447,16 +448,6 @@ namespace NextHydro {
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
 
-    Buffer Core::createStagingBuffer(VkDeviceSize size) const {
-
-        Buffer stagingBuffer(device, "", physicalDevice,
-                             size,
-                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        );
-        return stagingBuffer;
-    }
-
     ComputePipeline* Core::createComputePipeline(const char *shaderPath) const {
 
         return new ComputePipeline{ device, "", shaderPath };
@@ -531,10 +522,29 @@ namespace NextHydro {
         vkDeviceWaitIdle(device);
     }
 
+    Buffer Core::createTempStagingBuffer(VkDeviceSize size) const {
+
+        Buffer stagingBuffer(device, "", physicalDevice,
+                             size,
+                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        return stagingBuffer;
+    }
+
+    void Core::createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const {
+
+        uniformBuffer = new Buffer(device, name, physicalDevice,
+                             size,
+                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+    }
+
     void Core::createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory) {
 
-        auto stagingBuffer = createStagingBuffer(blockMemory.size);
-        stagingBuffer.writeData(static_cast<void*>(blockMemory.buffer.get()));
+        auto stagingBuffer = createTempStagingBuffer(blockMemory.size);
+        stagingBuffer.writeData(blockMemory.buffer.get());
 
         uniformBuffer = new Buffer(device, name, physicalDevice,
                                    blockMemory.size,
@@ -546,8 +556,8 @@ namespace NextHydro {
 
     void Core::createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory) {
 
-        auto stagingBuffer = createStagingBuffer(blockMemory.size);
-        stagingBuffer.writeData(static_cast<void*>(blockMemory.buffer.get()));
+        auto stagingBuffer = createTempStagingBuffer(blockMemory.size);
+        stagingBuffer.writeData(blockMemory.buffer.get());
 
         storageBuffer = new Buffer(device, name, physicalDevice,
                                    blockMemory.size,
@@ -582,10 +592,10 @@ namespace NextHydro {
         currentFenceIndex = 0;
     }
 
-    void Core::commandBegin() {
+    VkCommandBuffer Core::commandBegin() {
         if (currentCommandBufferIndex == commandBuffers.size()) createCommandBuffer();
 
-        const auto& commandBuffer = commandBuffers[currentCommandBufferIndex];
+        auto commandBuffer = commandBuffers[currentCommandBufferIndex];
         vkResetCommandBuffer(commandBuffer, 0);
         VkCommandBufferBeginInfo beginInfo = {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
@@ -593,11 +603,11 @@ namespace NextHydro {
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording compute command buffer!");
         }
+        return commandBuffer;
     }
 
-    void Core::dispatch(const ComputePipeline* pipeline, const std::array<uint32_t, 3> groupCounts) {
+    void Core::dispatch(const VkCommandBuffer& commandBuffer, const ComputePipeline* pipeline, const std::array<uint32_t, 3> groupCounts) {
 
-        const auto & commandBuffer = commandBuffers[currentCommandBufferIndex];
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
         vkCmdBindDescriptorSets(
                 commandBuffer,
@@ -620,6 +630,20 @@ namespace NextHydro {
     }
 
     void readData(const Json& json, std::vector<float_t >& data) {
+        if (json.is_array()) {
+            data.reserve(json.size());
+            auto jsonData = json.get<std::vector<float_t>>();
+            data.insert(data.end(), jsonData.begin(), jsonData.end());
+        } else {
+            if(json["length"] == nullptr) {
+                throw std::runtime_error("data resource is not valid");
+            }
+            size_t length = json["length"];
+            data.resize(length, 0);
+        }
+    }
+
+    void readData(const std::vector<std::string>& typeList, const Json& json, std::vector<char >& data) {
         if (json.is_array()) {
             data.reserve(json.size());
             auto jsonData = json.get<std::vector<float_t>>();
@@ -661,20 +685,11 @@ namespace NextHydro {
             Json layout = bufferLayouts[uniformInfo["layout"]];
             std::vector<std::string> typeList = layout["type"];
             std::vector<std::string> dataNames = layout["data"];
-            size_t totalSize = 0;
-            std::vector<float_t> totalData;
             for (const auto& dataName: dataNames) {
-                totalSize += dataResource[dataName].size();
+                Block block(typeList, dataResource[dataName]);
+                createUniformBuffer(name, buffer, block);
+                bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
             }
-            totalData.reserve(totalSize);
-            for (const auto& dataName : dataNames) {
-                std::vector<float_t> data;
-                readData(dataResource[dataName], data);
-                totalData.insert(totalData.end(), data.begin(), data.end());
-            }
-            Block block(typeList, totalData);
-            createUniformBuffer(name, buffer, block);
-            bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
         }
 
         // Create storages
@@ -684,20 +699,11 @@ namespace NextHydro {
             Json layout = bufferLayouts[storageInfo["layout"]];
             std::vector<std::string> typeList = layout["type"];
             std::vector<std::string> dataNames = layout["data"];
-            size_t totalSize = 0;
-            std::vector<float_t> totalData;
             for (const auto& dataName: dataNames) {
-                totalSize += dataResource[dataName].size();
+                Block block(typeList, dataResource[dataName]);
+                createStorageBuffer(name, buffer, block);
+                bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
             }
-            totalData.reserve(totalSize);
-            for (const auto& dataName : dataNames) {
-                std::vector<float_t> data;
-                readData(dataResource[dataName], data);
-                totalData.insert(totalData.end(), data.begin(), data.end());
-            }
-            Block block(typeList, totalData);
-            createStorageBuffer(name, buffer, block);
-            bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
         }
 
         // Create passes
@@ -720,7 +726,7 @@ namespace NextHydro {
             switch (nodeInfo["type"].get<size_t>()) {
                 case 0b01:{
                     size_t count = nodeInfo["count"];
-                    flowNodeList.emplace_back(std::make_unique<IterableFlowNode>(passPointers, count));
+                    flowNodeList.emplace_back(std::make_unique<IterableFlowNode>(device, passPointers, count));
                     break;
                 }
                 case 0b11: {
@@ -728,7 +734,15 @@ namespace NextHydro {
                     std::string operation = nodeInfo["operation"];
                     size_t flagIndex = nodeInfo["flagIndex"];
                     float_t flag = nodeInfo["flag"];
-                    flowNodeList.emplace_back(std::make_unique<FlagFlowNode>(passPointers, flagBuffer, operation, flagIndex, flag));
+
+                    Buffer* buffer = nullptr;
+                    std::string bufferName = "Flag Staging Buffer for " + nodeInfo["flagBuffer"].get<std::string>();
+                    if (isDiscrete) {
+                        createStagingBuffer(bufferName, buffer, 4);
+                        bufferMap.emplace(bufferName, std::shared_ptr<Buffer>(buffer));
+                    }
+
+                    flowNodeList.emplace_back(std::make_unique<PollableFlowNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
                     break;
                 }
             }
@@ -737,7 +751,7 @@ namespace NextHydro {
 
     void Core::runScript() {
 
-        // Tick logic
+        // Initialize
         for (const auto& node : flowNodeList) {
             for (const auto& pass : node->passes) {
                 auto pipeline = pipelineMap[pass->shader].get();
@@ -749,16 +763,20 @@ namespace NextHydro {
             }
         }
 
-        // Tick compute
+        // Tick
         std::vector<float> step;
         const auto flagBuffer = bufferMap["stepBuffer"].get();
         for (const auto& node : flowNodeList) {
+
             while(node->isComplete()) {
                 preheat();
-                commandBegin();
+                auto commandBuffer = commandBegin();
+
                 for (const auto& pass: node->passes) {
-                    dispatch(pipelineMap[pass->shader].get(), pass->groupCounts);
+                    Core::dispatch(commandBuffer, pipelineMap[pass->shader].get(), pass->groupCounts);
                 }
+                node->postProcess(commandBuffer);
+
                 commandEnd();
                 submit();
             }

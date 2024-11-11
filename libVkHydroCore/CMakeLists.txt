@@ -5,7 +5,7 @@ set (PROJECT_NAME "VkHydroCore")
 project(${PROJECT_NAME})
 
 # Set variables
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(ENABLE_VALIDATION_LAYER FALSE)
 set(RESOURCE_DIR "${CMAKE_SOURCE_DIR}/res")
 set(SHADER_SOURCE_DIR "${RESOURCE_DIR}/shaders")
@@ -126,6 +126,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 list(APPEND LIBS nlohmann_json::nlohmann_json)
+
+# RTTR
+find_package(RTTR CONFIG REQUIRED Core)
+list(APPEND LIBS RTTR::Core)
 
 # Find cpp files
 file(GLOB_RECURSE CPP_FILES ${SOURCE_DIR}/*.cpp)

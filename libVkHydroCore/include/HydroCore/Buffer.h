@@ -5,12 +5,18 @@
 #ifndef VKHYDROCORE_BUFFER_H
 #define VKHYDROCORE_BUFFER_H
 
-#include <stdexcept>
+#include <vector>
 #include <utility>
+#include <stdexcept>
 #include <vulkan/vulkan.h>
 #include "config.h"
 
 namespace NextHydro {
+
+    union Flag {
+        char c[4];
+        float f;
+    };
 
     struct ScopedMemoryMapping {
 
@@ -18,10 +24,10 @@ namespace NextHydro {
         void*                     mappedData          = nullptr;
         VkDeviceMemory            memory              = VK_NULL_HANDLE;
 
-        ScopedMemoryMapping(const VkDevice& device, VkDeviceMemory& memory, VkDeviceSize size)
+        ScopedMemoryMapping(const VkDevice& device, VkDeviceMemory& memory, VkDeviceSize size, size_t offset = 0)
                 : device(device), memory(memory)
-        {
-            if (vkMapMemory(device, memory, 0, size, 0, &mappedData) != VK_SUCCESS) {
+       {
+            if (vkMapMemory(device, memory, offset, size, 0, &mappedData) != VK_SUCCESS) {
                 throw std::runtime_error("failed to map memory!");
             }
         };
@@ -52,18 +58,10 @@ namespace NextHydro {
             vkFreeMemory(m_device, memory, nullptr);
         }
 
-        template<typename T>
-        void writeData(const T& data) {
+        void writeData(char* pData) {
 
             auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
-            memcpy(mappedMemory.mappedData, data, static_cast<size_t>(size));
-        } // auto unmap
-
-        template<typename T>
-        void writeData(const std::vector<T>& data) {
-
-            auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
-            memcpy(mappedMemory.mappedData, data.data(), static_cast<size_t>(size));
+            memcpy(mappedMemory.mappedData, pData, static_cast<size_t>(size));
         } // auto unmap
 
         template<typename T>
@@ -71,6 +69,11 @@ namespace NextHydro {
             data.resize(size / sizeof(T));
             auto mappedMemory = ScopedMemoryMapping(m_device, memory, size);
             memcpy(data.data(), mappedMemory.mappedData, static_cast<size_t>(size));
+        } // auto unmap
+
+        void readFlag(Flag& flag, size_t offset = 0) {
+            auto mappedMemory = ScopedMemoryMapping(m_device, memory, 4, offset);
+            memcpy(flag.c, mappedMemory.mappedData, 4);
         } // auto unmap
 
         VkDescriptorBufferInfo& getDescriptorBufferInfo(VkDeviceSize offset = 0, VkDeviceSize range = 0) {

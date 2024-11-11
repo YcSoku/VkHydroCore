@@ -56,14 +56,16 @@ namespace NextHydro {
     };
 
     struct IFlowNode {
-        std::vector<std::shared_ptr<ComputePass>> passes;
+        const VkDevice&                             device;
+        std::vector<std::shared_ptr<ComputePass>>   passes;
 
-        explicit IFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes)
-        : passes(passes)
+        explicit IFlowNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes)
+        : device(_device), passes(passes)
         {}
 
         virtual bool isComplete() = 0;
         virtual char nodeType() = 0;
+        virtual void postProcess(const VkCommandBuffer& commandBuffer) = 0;
         virtual ~IFlowNode() = default;
     };
 
@@ -71,8 +73,8 @@ namespace NextHydro {
         size_t count;
         size_t currentFrame = 0;
 
-        IterableFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes, size_t count)
-                : IFlowNode(passes), count(count)
+        IterableFlowNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, size_t count)
+                : IFlowNode(_device, passes), count(count)
         {}
 
         bool isComplete() override {
@@ -82,39 +84,48 @@ namespace NextHydro {
         }
 
         char nodeType() override { return 0b01; }
+
+        void postProcess(const VkCommandBuffer& commandBuffer) override {}
     };
 
-    struct FlagFlowNode : public IFlowNode {
-        char type = 0b11;
-        float_t flag;
-        size_t flagIndex;
-        std::function<bool()> op;
-        std::shared_ptr<Buffer> flagBuffer;
+    struct PollableFlowNode : public IFlowNode {
+        char                                            type = 0b11;
+        std::function<bool()>                           op;
+        Flag                                            flag;
+        float_t                                         threshold;
+        size_t                                          flagIndex;
+        std::shared_ptr<Buffer>                         flagBuffer;
+        Buffer*                                         stagingBuffer;
+        std::function<void(const VkCommandBuffer&)>     postProcessFunc;
 
-        FlagFlowNode(const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, const std::string& operation, size_t _flagIndex, float_t _flag)
-            : IFlowNode(passes), flagBuffer(_flagBuffer), flagIndex(_flagIndex), flag(_flag)
+        PollableFlowNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, Buffer* _stagingBuffer, const std::string& operation, size_t _flagIndex, float_t _threshold, bool isDiscrete)
+            : IFlowNode(_device, passes), flagBuffer(_flagBuffer), stagingBuffer(_stagingBuffer), flagIndex(_flagIndex), threshold(_threshold), flag({.f = 0.0})
         {
-
+            flag.f = 0.0;
             if (operation == "less") {
-                op = [this]() { return getData() < flag; };
+                op = [this]() { return getData() < threshold; };
             } else if (operation == "lEqual") {
-                op = [this]() { return getData() <= flag; };
+                op = [this]() { return getData() <= threshold; };
             } else if (operation == "greater") {
-                op = [this]() { return getData() > flag; };
+                op = [this]() { return getData() > threshold; };
             } else if (operation == "gEqual") {
-                op = [this]() { return getData() >= flag; };
+                op = [this]() { return getData() >= threshold; };
             } else {
-                op = [this]() { return getData() == flag; };
+                op = [this]() { return getData() == threshold; };
+            }
+
+            if (isDiscrete) {
+                postProcessFunc = [this](const VkCommandBuffer& commandBuffer) { postProcessForDiscreteGPU(commandBuffer); };
+            } else {
+                postProcessFunc = [](const VkCommandBuffer& commandBuffer) {};
+                stagingBuffer = flagBuffer.get();
             }
         }
 
-        [[nodiscard]] float getData() const {
-
-            std::vector<float> step;
-            flagBuffer->readData(step);
-            float currentStep = step[flagIndex];
-            std::cout << step[0] << std::endl;
-            return currentStep;
+        [[nodiscard]] float getData() {
+            stagingBuffer->readFlag(flag, flagIndex * 4);
+            std::cout << "Total time: " << flag.f << std::endl;
+            return flag.f;
         }
 
         bool isComplete() override {
@@ -122,6 +133,29 @@ namespace NextHydro {
         }
 
         char nodeType() override { return 0b11; }
+
+        void postProcess(const VkCommandBuffer& commandBuffer) override {
+            postProcessFunc(commandBuffer);
+        }
+
+        void postProcessForDiscreteGPU(const VkCommandBuffer& commandBuffer) const {
+            VkBufferCopy copyRegion = {
+                    .srcOffset = flagIndex * 4,
+                    .dstOffset = 0,
+                    .size = 4,
+            };
+            vkCmdCopyBuffer(commandBuffer, flagBuffer->buffer, stagingBuffer->buffer, 1, &copyRegion);
+        }
+
+//        [[nodiscard]] float getData() const {
+//
+//            std::vector<float> step;
+//            flagBuffer->readData(step);
+//            float currentStep = step[flagIndex];
+//            auto uStep = reinterpret_cast<uint32_t *>(step.data());
+//            std::cout << "Total time: " << currentStep << ", step: " << float(uStep[0]) / 10000.0 << std::endl;
+//            return currentStep;
+//        }
     };
 
     class Core {
@@ -139,6 +173,7 @@ namespace NextHydro {
         uint32_t                            currentFenceIndex           =   0;
         std::vector<VkCommandBuffer>        commandBuffers;
         std::vector<VkFence>                fences;
+        bool                                isDiscrete                  =   false;
 
         std::vector<ComputePass>                                            passList;
         std::unordered_map<std::string, std::shared_ptr<ComputePass>>       passMap;
@@ -153,20 +188,20 @@ namespace NextHydro {
         Core();
         ~Core();
 
-        void                                commandBegin();
-        void                                dispatch(const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
+        VkCommandBuffer                     commandBegin();
+        static void                         dispatch(const VkCommandBuffer& commandBuffer, const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
         void                                commandEnd();
         void                                runScript();
         void                                preheat();
         void                                submit();
         void                                idle() const;
         void                                parseScript(const char* path);
-//        void                                tick(ComputePipeline *computePipeline, VkDeviceSize x, VkDeviceSize y, VkDeviceSize z);
         void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
 
-        [[nodiscard]] Buffer                createStagingBuffer(VkDeviceSize size) const;
         ComputePipeline*                    createComputePipeline(const char *shaderPath) const;
 
+        [[nodiscard]] Buffer                createTempStagingBuffer(VkDeviceSize size) const;
+        void                                createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const;
         void                                createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory);
         void                                createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory);
 
