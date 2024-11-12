@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 set (PROJECT_NAME "HydroCorePlayer")
 project(${PROJECT_NAME})
+set(CMAKE_CXX_FLAGS_HIGH_PERFORMANCE "-Ofast -march=native -funroll-loops -flto -fomit-frame-pointer")
 
 # Set variables
 set(CMAKE_CXX_STANDARD 20)

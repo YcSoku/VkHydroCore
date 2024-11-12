@@ -16,7 +16,6 @@
 #include "nlohmann/json.hpp"
 
 using Json = nlohmann::json;
-
 namespace NextHydro {
 
     struct QueueFamilyIndices {
@@ -31,27 +30,12 @@ namespace NextHydro {
         }
     };
 
-    struct ResourceBinding {
-        VkDeviceSize    set;
-        VkDeviceSize    binding;
-        std::string     name;
-
-        static ResourceBinding deserialize(const nlohmann::json& json) {
-            return ResourceBinding {
-                    .set        = json["set"],
-                    .binding    = json["binding"],
-                    .name       = json["name"]
-            };
-        }
-    };
-
     struct ComputePass {
         std::string                     shader;
-        std::vector<ResourceBinding>    resource;
         std::array<uint32_t, 3>         groupCounts;
 
-        ComputePass(std::string& shader, std::vector<ResourceBinding>& resource, std::array<uint32_t, 3>& groupCounts)
-                : shader(std::move(shader)), resource(std::move(resource)), groupCounts(groupCounts)
+        ComputePass(std::string& shader, std::array<uint32_t, 3>& groupCounts)
+                : shader(std::move(shader)), groupCounts(groupCounts)
         {}
     };
 
@@ -146,66 +130,77 @@ namespace NextHydro {
             };
             vkCmdCopyBuffer(commandBuffer, flagBuffer->buffer, stagingBuffer->buffer, 1, &copyRegion);
         }
-
-//        [[nodiscard]] float getData() const {
-//
-//            std::vector<float> step;
-//            flagBuffer->readData(step);
-//            float currentStep = step[flagIndex];
-//            auto uStep = reinterpret_cast<uint32_t *>(step.data());
-//            std::cout << "Total time: " << currentStep << ", step: " << float(uStep[0]) / 10000.0 << std::endl;
-//            return currentStep;
-//        }
     };
 
     class Core {
-
-    public:
-        VkInstance                          instance                    =   VK_NULL_HANDLE;
-        VkPhysicalDevice                    physicalDevice              =   VK_NULL_HANDLE;
-        VkDevice                            device                      =   VK_NULL_HANDLE;
-        VkQueue                             computeQueue                =   VK_NULL_HANDLE;
-        VkCommandPool                       commandPool                 =   VK_NULL_HANDLE;
-        VkDescriptorPool                    storageDescriptorPool       =   VK_NULL_HANDLE;
-        VkSemaphore                         computeFinishedSemaphores   =   VK_NULL_HANDLE;
-        VkFence                             computeInFlightFences       =   VK_NULL_HANDLE;
-        uint32_t                            currentCommandBufferIndex   =   0;
-        uint32_t                            currentFenceIndex           =   0;
-        std::vector<VkCommandBuffer>        commandBuffers;
-        std::vector<VkFence>                fences;
-        bool                                isDiscrete                  =   false;
-
-        std::vector<ComputePass>                                            passList;
-        std::unordered_map<std::string, std::shared_ptr<ComputePass>>       passMap;
-        std::unordered_map<std::string, std::shared_ptr<Buffer>>            bufferMap;
-        std::unordered_map<std::string, std::shared_ptr<ComputePipeline>>   pipelineMap;
-        std::vector<std::unique_ptr<IFlowNode>>                             flowNodeList;
 
     private:
         VkDebugUtilsMessengerEXT            m_debugMessenger            = VK_NULL_HANDLE;
 
     public:
+        bool                                isDiscrete                  =   false;
+        uint32_t                            currentFenceIndex           =   0;
+        uint32_t                            currentCommandBufferIndex   =   0;
+
+        VkDevice                            device                      =   VK_NULL_HANDLE;
+        VkInstance                          instance                    =   VK_NULL_HANDLE;
+        VkCommandPool                       commandPool                 =   VK_NULL_HANDLE;
+        VkQueue                             computeQueue                =   VK_NULL_HANDLE;
+        VkDescriptorPool                    descriptorPool              =   VK_NULL_HANDLE;
+        VkPhysicalDevice                    physicalDevice              =   VK_NULL_HANDLE;
+        VkFence                             computeInFlightFences       =   VK_NULL_HANDLE;
+        VkDescriptorPool                    storageDescriptorPool       =   VK_NULL_HANDLE;
+        VkSemaphore                         computeFinishedSemaphores   =   VK_NULL_HANDLE;
+
+        std::vector<VkFence>                                                fences;
+        std::vector<std::unique_ptr<IFlowNode>>                             flowNode_list;
+        std::vector<VkCommandBuffer>                                        commandBuffers;
+        std::vector<VkDescriptorSet>                                        descriptorSetPool;
+        std::vector<VkCopyDescriptorSet>                                    descriptorCopySets;
+        std::vector<VkWriteDescriptorSet>                                   descriptorWriteSets;
+
+        std::unordered_map<std::string, std::shared_ptr<ComputePass>>       name_pass_map;
+        std::unordered_map<std::string, std::shared_ptr<Buffer>>            name_buffer_map;
+        std::unordered_map<std::string, std::shared_ptr<ComputePipeline>>   name_pipeline_map;
+        std::unordered_map<std::string, std::array<uint32_t, 2>>            buffer_descriptorSetPool_Map;
+
+    public:
         Core();
         ~Core();
 
-        VkCommandBuffer                     commandBegin();
-        static void                         dispatch(const VkCommandBuffer& commandBuffer, const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
-        void                                commandEnd();
+        // Running Mode <Script-Framework> [ parse -> run ]
+        void                                parseScript(const char* path);
         void                                runScript();
+
+        // TODO: Implement running mode with simulation-framework
+        // Running Mode <Simulation-Framework> [ initialization -> step -> ... -> step -> output ]
+        void                                initialization();
+        void                                output();
+        void                                step();
+
+        // Basic Operation for Submit [ preheat -> begin -> end -> submit ]
+        VkCommandBuffer                     commandBegin();
+        void                                commandEnd();
         void                                preheat();
         void                                submit();
-        void                                idle() const;
-        void                                parseScript(const char* path);
+
+        // Basic Operation for Computation
         void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
+        static void                         dispatch(const VkCommandBuffer& commandBuffer, const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
+        void                                updateBindings() const;
 
-        ComputePipeline*                    createComputePipeline(const char *shaderPath) const;
+        // Basic Operation for Synchronization
+        void                                idle() const;
 
+        // Create Buffers
         [[nodiscard]] Buffer                createTempStagingBuffer(VkDeviceSize size) const;
-        void                                createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const;
         void                                createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory);
         void                                createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory);
+        void                                createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const;
 
     private:
+
+        // Functions for Core Creation
         void                                createFence();
         void                                createInstance();
         void                                createCommandPool();
@@ -213,9 +208,7 @@ namespace NextHydro {
         void                                pickPhysicalDevice();
         void                                setupDebugMessenger();
         void                                createLogicalDevice();
-        void                                createDescriptorPool();
-        size_t                              createCommandBuffer();
-//        void                                recordComputeCommandBuffer(const ComputePipeline& computePipeline) const;
+        void                                createCommandBuffer();
     };
 }
 #endif //VKHYDROCORE_CORE_H

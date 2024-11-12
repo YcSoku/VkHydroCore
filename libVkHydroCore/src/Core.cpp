@@ -448,31 +448,7 @@ namespace NextHydro {
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
 
-    ComputePipeline* Core::createComputePipeline(const char *shaderPath) const {
-
-        return new ComputePipeline{ device, "", shaderPath };
-    }
-
-    void Core::createDescriptorPool() {
-
-        VkDescriptorPoolSize poolSize = {
-                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 2
-        };
-
-        VkDescriptorPoolCreateInfo poolInfo = {
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                .maxSets = 1,
-                .poolSizeCount = 1,
-                .pPoolSizes = &poolSize,
-        };
-
-        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &storageDescriptorPool) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create descriptor pool!");
-        }
-    }
-
-    size_t Core::createCommandBuffer() {
+    void Core::createCommandBuffer() {
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -485,7 +461,6 @@ namespace NextHydro {
             throw std::runtime_error("failed to allocate compute command buffers!");
         }
         commandBuffers.emplace_back(commandBuffer);
-        return commandBuffers.size() - 1;
     }
 
     void Core::createSyncObjects() {
@@ -535,9 +510,9 @@ namespace NextHydro {
     void Core::createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const {
 
         uniformBuffer = new Buffer(device, name, physicalDevice,
-                             size,
-                             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                                   size,
+                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         );
     }
 
@@ -561,8 +536,8 @@ namespace NextHydro {
 
         storageBuffer = new Buffer(device, name, physicalDevice,
                                    blockMemory.size,
-                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
         );
         copyBuffer(stagingBuffer.buffer, storageBuffer->buffer, blockMemory.size);
     }
@@ -629,32 +604,8 @@ namespace NextHydro {
         }
     }
 
-    void readData(const Json& json, std::vector<float_t >& data) {
-        if (json.is_array()) {
-            data.reserve(json.size());
-            auto jsonData = json.get<std::vector<float_t>>();
-            data.insert(data.end(), jsonData.begin(), jsonData.end());
-        } else {
-            if(json["length"] == nullptr) {
-                throw std::runtime_error("data resource is not valid");
-            }
-            size_t length = json["length"];
-            data.resize(length, 0);
-        }
-    }
-
-    void readData(const std::vector<std::string>& typeList, const Json& json, std::vector<char >& data) {
-        if (json.is_array()) {
-            data.reserve(json.size());
-            auto jsonData = json.get<std::vector<float_t>>();
-            data.insert(data.end(), jsonData.begin(), jsonData.end());
-        } else {
-            if(json["length"] == nullptr) {
-                throw std::runtime_error("data resource is not valid");
-            }
-            size_t length = json["length"];
-            data.resize(length, 0);
-        }
+    void Core::updateBindings() const {
+        vkUpdateDescriptorSets(device, descriptorWriteSets.size(), descriptorWriteSets.data(), descriptorCopySets.size(), descriptorCopySets.data());
     }
 
     void Core::parseScript(const char *path) {
@@ -663,36 +614,16 @@ namespace NextHydro {
         Json script = readJsonFile(path);
 
         // Get assets
-        const auto& dataResource = script["dataResource"];
         const auto& bufferLayouts = script["bufferLayouts"];
+        const auto& dataResource = script["dataResource"];
         const auto& uniforms = script["uniforms"];
         const auto& storages = script["storages"];
         const auto& shaders = script["shaders"];
         const auto& passes = script["passes"];
         const auto& flow = script["flow"];
 
-        // Create pipelines
-        for (const auto& shaderInfo: shaders) {
-            auto name = shaderInfo["name"].get<std::string>();
-            auto glslCode = readShaderFile(shaderInfo["path"].get<std::string>());
-            pipelineMap.emplace(name, std::make_shared<ComputePipeline>(device, name.c_str(), glslCode.c_str()));
-        }
-
-        // Create uniforms
-        for (const auto& uniformInfo: uniforms ) {
-            Buffer* buffer = nullptr;
-            std::string name = uniformInfo["name"];
-            Json layout = bufferLayouts[uniformInfo["layout"]];
-            std::vector<std::string> typeList = layout["type"];
-            std::vector<std::string> dataNames = layout["data"];
-            for (const auto& dataName: dataNames) {
-                Block block(typeList, dataResource[dataName]);
-                createUniformBuffer(name, buffer, block);
-                bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
-            }
-        }
-
         // Create storages
+        uint32_t bindingIndex = 0;
         for (const auto& storageInfo: storages) {
             Buffer* buffer = nullptr;
             std::string name = storageInfo["name"];
@@ -702,18 +633,170 @@ namespace NextHydro {
             for (const auto& dataName: dataNames) {
                 Block block(typeList, dataResource[dataName]);
                 createStorageBuffer(name, buffer, block);
-                bufferMap.emplace(name, std::shared_ptr<Buffer>(buffer));
+                name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
+            }
+            buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t, 2>{ 0, bindingIndex++});
+        }
+
+        // Create uniforms
+        bindingIndex = 0;
+        for (const auto& uniformInfo: uniforms ) {
+            Buffer* buffer = nullptr;
+            std::string name = uniformInfo["name"];
+            Json layout = bufferLayouts[uniformInfo["layout"]];
+            std::vector<std::string> typeList = layout["type"];
+            std::vector<std::string> dataNames = layout["data"];
+            for (const auto& dataName: dataNames) {
+                Block block(typeList, dataResource[dataName]);
+                createUniformBuffer(name, buffer, block);
+                name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
+            }
+            buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t , 2>{ 1, bindingIndex++});
+        }
+
+        // Create descriptor pool
+        uint32_t sizeFactor = 100;
+        uint32_t storageBufferNum = storages.size();
+        uint32_t uniformBufferNum = uniforms.size();
+        std::vector<VkDescriptorPoolSize> poolSizes;
+        if (storageBufferNum > 0) poolSizes.push_back({
+                                                              .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                              .descriptorCount = storageBufferNum * sizeFactor
+                                                      });
+        if (uniformBufferNum > 0) poolSizes.push_back({
+                                                              .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                              .descriptorCount = uniformBufferNum * sizeFactor
+                                                      });
+        VkDescriptorPoolCreateInfo poolInfo = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                .maxSets = 2 * sizeFactor,
+                .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+                .pPoolSizes = poolSizes.data()
+        };
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+
+        // Create descriptor set layout pool
+        std::vector<VkDescriptorSetLayout> descriptorSetLayouts(2);
+        std::vector<VkDescriptorSetLayoutBinding> storageBindings(storageBufferNum);
+        std::vector<VkDescriptorSetLayoutBinding> uniformBindings(uniformBufferNum);
+        for (size_t i = 0; i < storageBufferNum; ++i) {
+            storageBindings[i].binding = i;
+            storageBindings[i].descriptorCount = 1;
+            storageBindings[i].pImmutableSamplers = nullptr;
+            storageBindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            storageBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        }
+        VkDescriptorSetLayoutCreateInfo storageLayoutInfo;
+        storageLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        storageLayoutInfo.pBindings = storageBindings.data();
+        storageLayoutInfo.bindingCount = storageBufferNum;
+        storageLayoutInfo.pNext = nullptr;
+        storageLayoutInfo.flags = 0;
+        if (vkCreateDescriptorSetLayout(device, &storageLayoutInfo, nullptr, &descriptorSetLayouts[0]) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create storage descriptor set layout!");
+        }
+        for (size_t i = 0; i < uniformBufferNum; ++i) {
+            uniformBindings[i].binding = i;
+            uniformBindings[i].descriptorCount = 1;
+            uniformBindings[i].pImmutableSamplers = nullptr;
+            uniformBindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            uniformBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        }
+        VkDescriptorSetLayoutCreateInfo uniformLayoutInfo;
+        uniformLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        uniformLayoutInfo.pBindings = uniformBindings.data();
+        uniformLayoutInfo.bindingCount = uniformBufferNum;
+        uniformLayoutInfo.pNext = nullptr;
+        uniformLayoutInfo.flags = 0;
+        if (vkCreateDescriptorSetLayout(device, &uniformLayoutInfo, nullptr, &descriptorSetLayouts[1]) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create uniform descriptor set layout!");
+        }
+
+        // Allocate descriptor set in GPU
+        VkDescriptorSetAllocateInfo allocInfo;
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorSetCount = descriptorSetLayouts.size();
+        allocInfo.pSetLayouts = descriptorSetLayouts.data();
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.pNext = nullptr;
+        descriptorSetPool.resize(descriptorSetLayouts.size());
+        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSetPool.data()) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor set for descriptor set pool!");
+        }
+
+        bindingIndex = 0;
+        descriptorWriteSets.resize(storageBufferNum + uniformBufferNum);
+        for (const auto& pair : buffer_descriptorSetPool_Map) {
+            auto bufferName = pair.first;
+            auto bindingInfo = pair.second;
+            VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            switch (bindingInfo[1]) {
+                case 0:
+                    descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    break;
+                case 1:
+                    descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    break;
+            }
+            descriptorWriteSets[bindingIndex++] = VkWriteDescriptorSet{
+                    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                    .dstSet = descriptorSetPool[bindingInfo[0]],
+                    .dstBinding = static_cast<uint32_t>(bindingInfo[1]),
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = descriptorType,
+                    .pBufferInfo = &name_buffer_map[bufferName].get()->getDescriptorBufferInfo(0, 0)
+            };
+        }
+
+        // Create pipelines
+        for (const auto& shaderInfo: shaders) {
+            auto name = shaderInfo["name"].get<std::string>();
+            auto bindingResource = shaderInfo["resource"];
+            auto glslCode = readShaderFile(shaderInfo["path"].get<std::string>());
+            const auto& pipeline = name_pipeline_map.emplace(name, std::make_shared<ComputePipeline>(device, name.c_str(), glslCode.c_str())).first->second;
+
+            // Allocate descriptor sets for pipeline
+            VkDescriptorSetAllocateInfo pipelineAllocInfo = {
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                    .descriptorPool = descriptorPool,
+                    .descriptorSetCount = static_cast<uint32_t>(pipeline->descriptorSetLayout.size()),
+                    .pSetLayouts = pipeline->descriptorSetLayout.data()
+            };
+            if (vkAllocateDescriptorSets(device, &pipelineAllocInfo, pipeline->descriptorSets.data()) != VK_SUCCESS) {
+                throw std::runtime_error("failed to allocate descriptor sets for pipeline!");
+            }
+
+            // Make connection between <descriptorSetPool> of Core and <descriptorSets> of pipeline
+            for (const auto& binding : bindingResource) {
+                std::string bindingName = binding["name"];
+                uint32_t bindingId = binding["binding"];
+                uint32_t bindingSet = binding["set"];
+                const auto& bindingInfo = buffer_descriptorSetPool_Map[bindingName];
+                descriptorCopySets.emplace_back(VkCopyDescriptorSet{
+                        .sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET,
+                        .srcSet = descriptorSetPool[bindingInfo[0]],
+                        .srcBinding = bindingInfo[1],
+                        .srcArrayElement = 0,
+                        .dstSet = pipeline->descriptorSets[bindingSet],
+                        .dstBinding = bindingId,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1
+                });
             }
         }
+
+        // Binding all resources to descriptor sets
+        updateBindings();
 
         // Create passes
         for (const auto& passInfo: passes) {
             std::string name = passInfo["name"];
-            std::vector<ResourceBinding> resource;
             std::string shader = passInfo["shader"];
             std::array<uint32_t , 3> groupCounts = passInfo["groupCounts"];
-            std::transform(passInfo["resource"].begin(), passInfo["resource"].end(), std::back_inserter(resource), &ResourceBinding::deserialize);
-            passMap.emplace(name, std::make_shared<ComputePass>(shader, resource, groupCounts));
+            name_pass_map.emplace(name, std::make_shared<ComputePass>(shader, groupCounts));
         }
 
         // Create flowNodes
@@ -721,16 +804,16 @@ namespace NextHydro {
             std::vector<std::string> passNames = nodeInfo["passes"];
             std::vector<std::shared_ptr<ComputePass>> passPointers(passNames.size());
             for (size_t i = 0; i < passNames.size(); ++i) {
-                passPointers[i] = passMap[passNames[i]];
+                passPointers[i] = name_pass_map[passNames[i]];
             }
             switch (nodeInfo["type"].get<size_t>()) {
                 case 0b01:{
                     size_t count = nodeInfo["count"];
-                    flowNodeList.emplace_back(std::make_unique<IterableFlowNode>(device, passPointers, count));
+                    flowNode_list.emplace_back(std::make_unique<IterableFlowNode>(device, passPointers, count));
                     break;
                 }
                 case 0b11: {
-                    std::shared_ptr<Buffer> flagBuffer = bufferMap[nodeInfo["flagBuffer"]];
+                    std::shared_ptr<Buffer> flagBuffer = name_buffer_map[nodeInfo["flagBuffer"]];
                     std::string operation = nodeInfo["operation"];
                     size_t flagIndex = nodeInfo["flagIndex"];
                     float_t flag = nodeInfo["flag"];
@@ -739,10 +822,10 @@ namespace NextHydro {
                     std::string bufferName = "Flag Staging Buffer for " + nodeInfo["flagBuffer"].get<std::string>();
                     if (isDiscrete) {
                         createStagingBuffer(bufferName, buffer, 4);
-                        bufferMap.emplace(bufferName, std::shared_ptr<Buffer>(buffer));
+                        name_buffer_map.emplace(bufferName, std::shared_ptr<Buffer>(buffer));
                     }
 
-                    flowNodeList.emplace_back(std::make_unique<PollableFlowNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
+                    flowNode_list.emplace_back(std::make_unique<PollableFlowNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
                     break;
                 }
             }
@@ -751,34 +834,24 @@ namespace NextHydro {
 
     void Core::runScript() {
 
-        // Initialize
-        for (const auto& node : flowNodeList) {
-            for (const auto& pass : node->passes) {
-                auto pipeline = pipelineMap[pass->shader].get();
-
-                for (const auto& buffer: pass->resource) {
-                    pipeline->bindBuffer(buffer.set, buffer.binding, bufferMap[buffer.name].get());
-                }
-                pipeline->tick();
-            }
-        }
-
-        // Tick
-        std::vector<float> step;
-        const auto flagBuffer = bufferMap["stepBuffer"].get();
-        for (const auto& node : flowNodeList) {
+        Flag flag{ .f = 0.0 };
+        const auto buffer = name_buffer_map["scalarBuffer"];
+        for (const auto& node : flowNode_list) {
 
             while(node->isComplete()) {
                 preheat();
                 auto commandBuffer = commandBegin();
 
                 for (const auto& pass: node->passes) {
-                    Core::dispatch(commandBuffer, pipelineMap[pass->shader].get(), pass->groupCounts);
+                    Core::dispatch(commandBuffer, name_pipeline_map[pass->shader].get(), pass->groupCounts);
                 }
                 node->postProcess(commandBuffer);
 
                 commandEnd();
                 submit();
+
+                buffer->readFlag(flag, 0);
+                std::cout << "Dt: " << float(flag.u) / 10000.0 << std::endl;
             }
         }
 

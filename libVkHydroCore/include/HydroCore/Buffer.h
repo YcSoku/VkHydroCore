@@ -14,8 +14,9 @@
 namespace NextHydro {
 
     union Flag {
-        char c[4];
-        float f;
+        char        c[4];
+        float       f;
+        uint32_t    u;
     };
 
     struct ScopedMemoryMapping {
@@ -42,11 +43,13 @@ namespace NextHydro {
         const VkDevice&     m_device;
 
     public:
-        std::string         name;
-        VkDeviceSize        size           = 0;
-        VkBuffer            buffer         = VK_NULL_HANDLE;
-        VkDeviceMemory      memory         = VK_NULL_HANDLE;
-        VkDescriptorBufferInfo descriptorBufferInfo = {};
+        std::string                 name;
+        VkDeviceSize                size           = 0;
+        VkBuffer                    buffer         = VK_NULL_HANDLE;
+        VkDeviceMemory              memory         = VK_NULL_HANDLE;
+        VkBufferUsageFlags          usageFlags     = 0;
+        VkDescriptorBufferInfo      descriptorBufferInfo = {};
+        VkDescriptorType            descriptorType = static_cast<VkDescriptorType>(0);
 
         Buffer(const VkDevice& device, std::string name, const VkPhysicalDevice& physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
                 : m_device(device), name(std::move(name)), size(size)
@@ -109,6 +112,10 @@ namespace NextHydro {
                 VkBufferUsageFlags              usage,
                 VkMemoryPropertyFlags           properties
         ) {
+            usageFlags = usage;
+            if          (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            else if     (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
             VkBufferCreateInfo bufferInfo = {
                     .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                     .size = size,

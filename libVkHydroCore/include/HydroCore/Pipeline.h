@@ -9,10 +9,12 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 #include <stdexcept>
 #include <filesystem>
 #include <unordered_map>
 #include "config.h"
+#include "Buffer.h"
 #include "vulkan/vulkan.h"
 #include "spirv_reflect.h"
 #include "nlohmann/json.hpp"
@@ -271,16 +273,10 @@ namespace NextHydro {
             create(glslCode);
         }
 
-        void bindBuffer(size_t set, size_t binding, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize range = 0){
-
-            size_t index = findDescriptorSetWriteIndex(set, binding);
-            descriptorSetWrite[index].pBufferInfo = &buffer->getDescriptorBufferInfo(offset, range);
-        }
-
-        void tick() {
-
-            vkUpdateDescriptorSets(m_device, descriptorSetWrite.size(), descriptorSetWrite.data(), 0, nullptr);
-        }
+//        void update() {
+//
+//            vkUpdateDescriptorSets(m_device, descriptorSetWrite.size(), descriptorSetWrite.data(), 0, nullptr);
+//        }
 
         ~ComputePipeline() {
             delete computeShaderModule;
@@ -315,92 +311,8 @@ namespace NextHydro {
                 throw std::runtime_error("failed to create compute pipeline!");
             }
 
-            // Generate descriptor pool
-            // Count all bindings
-            const auto& reflector = computeShaderModule->reflector->prototypeModule;
-            uint32_t poolSizeCount = 0;
-            uint32_t storageBufferNum = 0;
-            uint32_t uniformBufferNum = 0;
-            uint32_t bindingCount = reflector.descriptor_binding_count;
-            const auto& bindings = reflector.descriptor_bindings;
-
-            for(size_t i = 0; i < bindingCount; ++i) {
-                switch (bindings[i].descriptor_type) {
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                        if (storageBufferNum == 0) poolSizeCount ++;
-                        storageBufferNum ++;
-                        break;
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-                        if (uniformBufferNum == 0) poolSizeCount ++;
-                        uniformBufferNum ++;
-                        break;
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-                    case SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
-                        break;
-                }
-            }
-
-            size_t index = 0;
-            std::vector<VkDescriptorPoolSize> poolSizes(poolSizeCount);
-            if (storageBufferNum) poolSizes[index++] = {
-                        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        .descriptorCount = storageBufferNum
-                };
-            if (uniformBufferNum) poolSizes[index++] = {
-                        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        .descriptorCount = uniformBufferNum
-                };
-
-            VkDescriptorPoolCreateInfo poolInfo = {
-                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                    .maxSets = reflector.descriptor_set_count,
-                    .poolSizeCount = poolSizeCount,
-                    .pPoolSizes = poolSizes.data(),
-            };
-
-            if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create descriptor pool!");
-            }
-
-            // Allocate descriptor set in GPU
-            VkDescriptorSetAllocateInfo allocInfo = {
-                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                    .descriptorPool = descriptorPool,
-                    .descriptorSetCount = static_cast<uint32_t>(descriptorSetLayout.size()),
-                    .pSetLayouts = descriptorSetLayout.data()
-            };
-
-            descriptorSets.resize(reflector.descriptor_set_count);
-            if (vkAllocateDescriptorSets(m_device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-                throw std::runtime_error("failed to allocate descriptor sets!");
-            }
-
-            descriptorSetWrite.resize(bindingCount);
-            for(size_t i = 0; i < bindingCount; ++i) {
-                const auto& binding = bindings[i];
-                descriptorSetWrite[i] = VkWriteDescriptorSet {
-                        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                        .dstSet = descriptorSets[binding.set],
-                        .dstBinding = binding.binding,
-                        .dstArrayElement = binding.input_attachment_index,
-                        .descriptorCount = binding.count,
-                        .descriptorType = static_cast<VkDescriptorType>(binding.descriptor_type)
-                };
-
-                DescriptorKey key = {
-                        .set = binding.set,
-                        .binding = binding.binding
-                };
-                descriptorMap[key] = i;
-            }
+            // Resize descriptor set container
+            descriptorSets.resize(computeShaderModule->reflector->prototypeModule.descriptor_set_count);
         }
     };
 }
