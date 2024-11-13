@@ -8,7 +8,7 @@ namespace NH = NextHydro;
 int main() {
 
     // Script resource
-    fs::path jsonPath = RESOURCE_PATH / fs::path("run.hcs.json");
+    fs::path jsonPath = RESOURCE_PATH / fs::path("run.hcs.org.json");
 
     // Launch GPGPU core
     auto core = new NH::Core();

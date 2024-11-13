@@ -5,6 +5,7 @@
 #define SHADER_PATH "@SHADER_BINARY_DIR@"
 
 #cmakedefine ENABLE_VALIDATION_LAYER
+#cmakedefine PLATFORM_NEED_PORTABILITY
 
 #include <unordered_map>
 

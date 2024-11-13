@@ -135,22 +135,23 @@ namespace NextHydro {
     class Core {
 
     private:
-        VkDebugUtilsMessengerEXT            m_debugMessenger            = VK_NULL_HANDLE;
+        VkDebugUtilsMessengerEXT            m_debugMessenger                = VK_NULL_HANDLE;
 
     public:
-        bool                                isDiscrete                  =   false;
-        uint32_t                            currentFenceIndex           =   0;
-        uint32_t                            currentCommandBufferIndex   =   0;
+        bool                                isDiscrete                      =   false;
+        uint32_t                            currentFenceIndex               =   0;
+        uint32_t                            currentCommandBufferIndex       =   0;
+        uint32_t                            maxComputeWorkGroupInvocations  =   0;
 
-        VkDevice                            device                      =   VK_NULL_HANDLE;
-        VkInstance                          instance                    =   VK_NULL_HANDLE;
-        VkCommandPool                       commandPool                 =   VK_NULL_HANDLE;
-        VkQueue                             computeQueue                =   VK_NULL_HANDLE;
-        VkDescriptorPool                    descriptorPool              =   VK_NULL_HANDLE;
-        VkPhysicalDevice                    physicalDevice              =   VK_NULL_HANDLE;
-        VkFence                             computeInFlightFences       =   VK_NULL_HANDLE;
-        VkDescriptorPool                    storageDescriptorPool       =   VK_NULL_HANDLE;
-        VkSemaphore                         computeFinishedSemaphores   =   VK_NULL_HANDLE;
+        VkDevice                            device                          =   VK_NULL_HANDLE;
+        VkInstance                          instance                        =   VK_NULL_HANDLE;
+        VkCommandPool                       commandPool                     =   VK_NULL_HANDLE;
+        VkQueue                             computeQueue                    =   VK_NULL_HANDLE;
+        VkDescriptorPool                    descriptorPool                  =   VK_NULL_HANDLE;
+        VkPhysicalDevice                    physicalDevice                  =   VK_NULL_HANDLE;
+        VkFence                             computeInFlightFences           =   VK_NULL_HANDLE;
+        VkDescriptorPool                    storageDescriptorPool           =   VK_NULL_HANDLE;
+        VkSemaphore                         computeFinishedSemaphores       =   VK_NULL_HANDLE;
 
         std::vector<VkFence>                                                fences;
         std::vector<std::unique_ptr<IFlowNode>>                             flowNode_list;
@@ -169,12 +170,12 @@ namespace NextHydro {
         ~Core();
 
         // Running Mode <Script-Framework> [ parse -> run ]
-        void                                parseScript(const char* path);
+        void                                parseScript(const fs::path& path);
         void                                runScript();
 
         // TODO: Implement running mode with simulation-framework
         // Running Mode <Simulation-Framework> [ initialization -> step -> ... -> step -> output ]
-        void                                initialization();
+        void                                initialization(const fs::path& path);
         void                                output();
         void                                step();
 

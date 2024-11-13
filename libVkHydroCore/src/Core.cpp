@@ -19,7 +19,9 @@ namespace NextHydro {
     // Helpers ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     std::vector<const char*> deviceExtensions = {
+#ifdef PLATFORM_NEED_PORTABILITY
             "VK_KHR_portability_subset",
+#endif
             "VK_EXT_shader_atomic_float"
     };
 
@@ -192,7 +194,7 @@ namespace NextHydro {
         return indices;
     }
 
-    int rateDeviceSuitability(VkPhysicalDevice& device, bool& isDiscrete) {
+    int rateDeviceSuitability(VkPhysicalDevice& device, uint32_t& maxComputeWorkGroupInvocations, bool& isDiscrete) {
 
         VkPhysicalDeviceProperties deviceProperties;
         VkPhysicalDeviceFeatures deviceFeatures;
@@ -209,7 +211,7 @@ namespace NextHydro {
         vkGetPhysicalDeviceFeatures2(device, &deviceFeatures2);
 
         int score = 1;
-
+        maxComputeWorkGroupInvocations = deviceProperties.limits.maxComputeWorkGroupInvocations;
         if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             isDiscrete = true;
             score += 1000;
@@ -333,7 +335,7 @@ namespace NextHydro {
 
         std::multimap<int, VkPhysicalDevice> candidates;
         for (auto pDevice: physicalDevices) {
-            int score = rateDeviceSuitability(pDevice, isDiscrete);
+            int score = rateDeviceSuitability(pDevice, maxComputeWorkGroupInvocations, isDiscrete);
             candidates.insert(std::make_pair(score, pDevice));
         }
 
@@ -608,7 +610,7 @@ namespace NextHydro {
         vkUpdateDescriptorSets(device, descriptorWriteSets.size(), descriptorWriteSets.data(), descriptorCopySets.size(), descriptorCopySets.data());
     }
 
-    void Core::parseScript(const char *path) {
+    void Core::parseScript(const fs::path& path) {
 
         // Read json
         Json script = readJsonFile(path);
@@ -628,13 +630,9 @@ namespace NextHydro {
             Buffer* buffer = nullptr;
             std::string name = storageInfo["name"];
             Json layout = bufferLayouts[storageInfo["layout"]];
-            std::vector<std::string> typeList = layout["type"];
-            std::vector<std::string> dataNames = layout["data"];
-            for (const auto& dataName: dataNames) {
-                Block block(typeList, dataResource[dataName]);
-                createStorageBuffer(name, buffer, block);
-                name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
-            }
+            Block block(layout, storageInfo["resource"]);
+            createStorageBuffer(name, buffer, block);
+            name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
             buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t, 2>{ 0, bindingIndex++});
         }
 
@@ -644,13 +642,9 @@ namespace NextHydro {
             Buffer* buffer = nullptr;
             std::string name = uniformInfo["name"];
             Json layout = bufferLayouts[uniformInfo["layout"]];
-            std::vector<std::string> typeList = layout["type"];
-            std::vector<std::string> dataNames = layout["data"];
-            for (const auto& dataName: dataNames) {
-                Block block(typeList, dataResource[dataName]);
-                createUniformBuffer(name, buffer, block);
-                name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
-            }
+            Block block(layout, uniformInfo["resource"]);
+            createUniformBuffer(name, buffer, block);
+            name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
             buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t , 2>{ 1, bindingIndex++});
         }
 
@@ -681,6 +675,8 @@ namespace NextHydro {
         std::vector<VkDescriptorSetLayout> descriptorSetLayouts(2);
         std::vector<VkDescriptorSetLayoutBinding> storageBindings(storageBufferNum);
         std::vector<VkDescriptorSetLayoutBinding> uniformBindings(uniformBufferNum);
+
+        // - Storage buffer binding
         for (size_t i = 0; i < storageBufferNum; ++i) {
             storageBindings[i].binding = i;
             storageBindings[i].descriptorCount = 1;
@@ -697,6 +693,8 @@ namespace NextHydro {
         if (vkCreateDescriptorSetLayout(device, &storageLayoutInfo, nullptr, &descriptorSetLayouts[0]) != VK_SUCCESS) {
             throw std::runtime_error("failed to create storage descriptor set layout!");
         }
+
+        // - Uniform buffer binding
         for (size_t i = 0; i < uniformBufferNum; ++i) {
             uniformBindings[i].binding = i;
             uniformBindings[i].descriptorCount = 1;
@@ -732,7 +730,7 @@ namespace NextHydro {
             auto bufferName = pair.first;
             auto bindingInfo = pair.second;
             VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            switch (bindingInfo[1]) {
+            switch (bindingInfo[0]) {
                 case 0:
                     descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     break;
@@ -795,7 +793,15 @@ namespace NextHydro {
         for (const auto& passInfo: passes) {
             std::string name = passInfo["name"];
             std::string shader = passInfo["shader"];
-            std::array<uint32_t , 3> groupCounts = passInfo["groupCounts"];
+            std::array<uint32_t , 3> computeScale = passInfo["computeScale"];
+            auto groupWidth = sqrt(static_cast<double>(maxComputeWorkGroupInvocations));
+            auto groupHeight = groupWidth;
+            double groupDepth = 1.0;
+            auto x = static_cast<uint32_t>(ceil(computeScale[0] / groupWidth));
+            auto y = static_cast<uint32_t>(ceil(computeScale[1] / groupHeight));
+            auto z = static_cast<uint32_t>(ceil(computeScale[2] / groupDepth));
+            std::array<uint32_t , 3> groupCounts = { x, y, z };
+
             name_pass_map.emplace(name, std::make_shared<ComputePass>(shader, groupCounts));
         }
 
@@ -857,5 +863,9 @@ namespace NextHydro {
 
         // Wait for end
         idle();
+    }
+
+    void Core::initialization(const fs::path& path) {
+
     }
 }

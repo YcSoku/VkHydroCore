@@ -23,6 +23,10 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(ENABLE_VALIDATION_LAYER TRUE)
 endif()
 
+if (APPLE)
+    set(PLATFORM_NEED_PORTABILITY TRUE)
+endif ()
+
 # Vulkan
 find_package(Vulkan)
 if (Vulkan_FOUND)
