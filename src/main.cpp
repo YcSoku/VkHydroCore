@@ -26,7 +26,7 @@ int main() {
     std::cout << "Run time: " << duration.count() << "ms" << std::endl;
 
     // Check result
-    auto buffer = core->name_buffer_map["scalarBuffer"].get();
+    auto buffer = core->name_buffer_map["scalars"].get();
     std::vector<float_t> outputArray;
     buffer->readData(outputArray);
 

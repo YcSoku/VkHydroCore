@@ -41,4 +41,3 @@ target_include_directories(${PROJECT_NAME}
         ${Vulkan_INCLUDE_DIRS}
         ${NLOHMANN_JSON_INCLUDE_BUILD_DIR}
 )
-add_dependencies(${PROJECT_NAME} CompileShaders)

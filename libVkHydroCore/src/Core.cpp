@@ -18,6 +18,18 @@ namespace NextHydro {
     // ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Helpers ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+    struct QueueFamilyIndices {
+        std::optional<uint32_t> graphicsFamily;
+        std::optional<uint32_t> presentFamily;
+        std::optional<uint32_t> computeFamily;
+
+        bool isComplete()
+        {
+            // Only compute family is necessary
+            return computeFamily.has_value();
+        }
+    };
+
     std::vector<const char*> deviceExtensions = {
 #ifdef PLATFORM_NEED_PORTABILITY
             "VK_KHR_portability_subset",
@@ -257,7 +269,7 @@ namespace NextHydro {
 
     Core::~Core() {
 
-        vkDestroyDescriptorPool(device, storageDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
         vkDestroyDevice(device, nullptr);
 
@@ -616,11 +628,9 @@ namespace NextHydro {
         Json script = readJsonFile(path);
 
         // Get assets
-        const auto& bufferLayouts = script["bufferLayouts"];
-        const auto& dataResource = script["dataResource"];
-        const auto& uniforms = script["uniforms"];
+        const auto& pipelines = script["pipelines"];
         const auto& storages = script["storages"];
-        const auto& shaders = script["shaders"];
+        const auto& uniforms = script["uniforms"];
         const auto& passes = script["passes"];
         const auto& flow = script["flow"];
 
@@ -629,11 +639,12 @@ namespace NextHydro {
         for (const auto& storageInfo: storages) {
             Buffer* buffer = nullptr;
             std::string name = storageInfo["name"];
-            Json layout = bufferLayouts[storageInfo["layout"]];
-            Block block(layout, storageInfo["resource"]);
+            const Json& layout = storageInfo["layout"];
+            const Json& resource = storageInfo["resource"];
+            Block block(layout, resource);
             createStorageBuffer(name, buffer, block);
             name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
-            buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t, 2>{ 0, bindingIndex++});
+            buffer_descriptorSetPool_map.emplace(name, std::array<uint32_t, 2>{ 0, bindingIndex++});
         }
 
         // Create uniforms
@@ -641,11 +652,12 @@ namespace NextHydro {
         for (const auto& uniformInfo: uniforms ) {
             Buffer* buffer = nullptr;
             std::string name = uniformInfo["name"];
-            Json layout = bufferLayouts[uniformInfo["layout"]];
-            Block block(layout, uniformInfo["resource"]);
+            const Json& layout = uniformInfo["layout"];
+            const Json& resource = uniformInfo["resource"];
+            Block block(layout, resource);
             createUniformBuffer(name, buffer, block);
             name_buffer_map.emplace(name, std::shared_ptr<Buffer>(buffer));
-            buffer_descriptorSetPool_Map.emplace(name, std::array<uint32_t , 2>{ 1, bindingIndex++});
+            buffer_descriptorSetPool_map.emplace(name, std::array<uint32_t , 2>{ 1, bindingIndex++});
         }
 
         // Create descriptor pool
@@ -726,7 +738,7 @@ namespace NextHydro {
 
         bindingIndex = 0;
         descriptorWriteSets.resize(storageBufferNum + uniformBufferNum);
-        for (const auto& pair : buffer_descriptorSetPool_Map) {
+        for (const auto& pair : buffer_descriptorSetPool_map) {
             auto bufferName = pair.first;
             auto bindingInfo = pair.second;
             VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -750,10 +762,9 @@ namespace NextHydro {
         }
 
         // Create pipelines
-        for (const auto& shaderInfo: shaders) {
-            auto name = shaderInfo["name"].get<std::string>();
-            auto bindingResource = shaderInfo["resource"];
-            auto glslCode = readShaderFile(shaderInfo["path"].get<std::string>());
+        for (const auto& pipelineInfo: pipelines) {
+            auto name = pipelineInfo["name"].get<std::string>();
+            auto glslCode = readShaderFile(pipelineInfo["path"].get<std::string>());
             const auto& pipeline = name_pipeline_map.emplace(name, std::make_shared<ComputePipeline>(device, name.c_str(), glslCode.c_str())).first->second;
 
             // Allocate descriptor sets for pipeline
@@ -768,11 +779,11 @@ namespace NextHydro {
             }
 
             // Make connection between <descriptorSetPool> of Core and <descriptorSets> of pipeline
-            for (const auto& binding : bindingResource) {
-                std::string bindingName = binding["name"];
-                uint32_t bindingId = binding["binding"];
-                uint32_t bindingSet = binding["set"];
-                const auto& bindingInfo = buffer_descriptorSetPool_Map[bindingName];
+            for (size_t i = 0; i < pipeline->bindingResourceNames.size(); ++i) {
+                auto bindingName = pipeline->bindingResourceNames[i];
+                auto bindingId = pipeline->bindingResourceInfo[i][1];
+                auto bindingSet = pipeline->bindingResourceInfo[i][0];
+                const auto& bindingInfo = buffer_descriptorSetPool_map[bindingName];
                 descriptorCopySets.emplace_back(VkCopyDescriptorSet{
                         .sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET,
                         .srcSet = descriptorSetPool[bindingInfo[0]],
@@ -815,7 +826,7 @@ namespace NextHydro {
             switch (nodeInfo["type"].get<size_t>()) {
                 case 0b01:{
                     size_t count = nodeInfo["count"];
-                    flowNode_list.emplace_back(std::make_unique<IterableFlowNode>(device, passPointers, count));
+                    flowNode_list.emplace_back(std::make_unique<IterableCommandNode>(device, passPointers, count));
                     break;
                 }
                 case 0b11: {
@@ -831,7 +842,7 @@ namespace NextHydro {
                         name_buffer_map.emplace(bufferName, std::shared_ptr<Buffer>(buffer));
                     }
 
-                    flowNode_list.emplace_back(std::make_unique<PollableFlowNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
+                    flowNode_list.emplace_back(std::make_unique<PollableCommandNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
                     break;
                 }
             }
@@ -841,10 +852,12 @@ namespace NextHydro {
     void Core::runScript() {
 
         Flag flag{ .f = 0.0 };
-        const auto buffer = name_buffer_map["scalarBuffer"];
+        const auto buffer = name_buffer_map["scalars"];
         for (const auto& node : flowNode_list) {
 
-            while(node->isComplete()) {
+            node->tick();
+
+            while(!node->isComplete()) {
                 preheat();
                 auto commandBuffer = commandBegin();
 

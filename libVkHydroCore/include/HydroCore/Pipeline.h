@@ -225,6 +225,8 @@ namespace NextHydro {
         std::vector<VkDescriptorSet>                descriptorSets;
         std::vector<VkWriteDescriptorSet>           descriptorSetWrite;
         std::vector<VkDescriptorSetLayout>          descriptorSetLayout;
+        std::vector<std::string>                    bindingResourceNames;
+        std::vector<std::array<uint32_t, 2>>        bindingResourceInfo;
 
         ~IPipeline() {
 
@@ -273,11 +275,6 @@ namespace NextHydro {
             create(glslCode);
         }
 
-//        void update() {
-//
-//            vkUpdateDescriptorSets(m_device, descriptorSetWrite.size(), descriptorSetWrite.data(), 0, nullptr);
-//        }
-
         ~ComputePipeline() {
             delete computeShaderModule;
         }
@@ -312,7 +309,27 @@ namespace NextHydro {
             }
 
             // Resize descriptor set container
+            const auto& reflector = computeShaderModule->reflector->prototypeModule;
             descriptorSets.resize(computeShaderModule->reflector->prototypeModule.descriptor_set_count);
+
+            // Reflect binding info (name, set index and binding index used by the shader)
+            bindingResourceInfo.resize(reflector.descriptor_binding_count);
+            bindingResourceNames.resize(reflector.descriptor_binding_count);
+            for (size_t i = 0; i < reflector.descriptor_binding_count; ++i) {
+
+                if (reflector.descriptor_bindings[i].name != std::string("")) {
+                    bindingResourceNames[i] = reflector.descriptor_bindings[i].name;
+                } else if (reflector.descriptor_bindings[i].type_description->members[0].struct_member_name != std::string("")) {
+                    bindingResourceNames[i] = reflector.descriptor_bindings[i].type_description->members[0].struct_member_name;
+                } else {
+                    throw std::runtime_error("no suitable buffer name reflected from shader code.");
+                }
+
+                uint32_t binding = reflector.descriptor_bindings[i].binding;
+                uint32_t set = reflector.descriptor_bindings[i].set;
+                bindingResourceInfo[i] = { set, binding };
+            }
+            const int m = 0;
         }
     };
 }

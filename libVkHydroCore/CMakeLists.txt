@@ -37,28 +37,29 @@ endif()
 list(APPEND LIBS ${Vulkan_LIBRARIES})
 
 # Compile shaders
-set(SPIRV_FILES)
-file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
-file(GLOB SHADER_FILES
-        "${SHADER_SOURCE_DIR}/*.vert"
-        "${SHADER_SOURCE_DIR}/*.frag"
-        "${SHADER_SOURCE_DIR}/*.comp"
-)
-foreach (SHADER_FILE ${SHADER_FILES})
-    get_filename_component(FILENAME ${SHADER_FILE} NAME)
-    set(SPIRV_FILE "${SHADER_BINARY_DIR}/${FILENAME}.spv")
-
-    add_custom_command(
-            OUTPUT ${SPIRV_FILE}
-            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" ${SHADER_FILE} -o ${SPIRV_FILE}
-            DEPENDS ${SHADER_FILE}
-            COMMENT "Compiling ${FILENAME} to SPIR-V"
-    )
-    list(APPEND SPIRV_FILES ${SPIRV_FILE})
-endforeach ()
-add_custom_target(CompileShaders
-        DEPENDS ${SPIRV_FILES}
-)
+#set(SPIRV_FILES)
+#file(MAKE_DIRECTORY ${SHADER_BINARY_DIR})
+#file(GLOB SHADER_FILES
+#        "${SHADER_SOURCE_DIR}/*.vert"
+#        "${SHADER_SOURCE_DIR}/*.frag"
+#        "${SHADER_SOURCE_DIR}/*.comp"
+#)
+#foreach (SHADER_FILE ${SHADER_FILES})
+#    get_filename_component(FILENAME ${SHADER_FILE} NAME)
+#    set(SPIRV_FILE "${SHADER_BINARY_DIR}/${FILENAME}.spv")
+#
+#    add_custom_command(
+#            OUTPUT ${SPIRV_FILE}
+#            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" ${SHADER_FILE} -o ${SPIRV_FILE}
+#            DEPENDS ${SHADER_FILE}
+#            COMMENT "Compiling ${FILENAME} to SPIR-V"
+#    )
+#    list(APPEND SPIRV_FILES ${SPIRV_FILE})
+#endforeach ()
+#add_custom_target(CompileShaders
+#        DEPENDS ${SPIRV_FILES}
+#)
+#add_dependencies(${PROJECT_NAME} CompileShaders)
 
 # Configure header file
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.h.in
@@ -152,4 +153,3 @@ target_include_directories(${PROJECT_NAME}
         ${INCLUDE_OUTPUT_DIR}
         ${Vulkan_INCLUDE_DIRS}
 )
-add_dependencies(${PROJECT_NAME} CompileShaders)

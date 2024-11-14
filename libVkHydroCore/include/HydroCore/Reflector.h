@@ -10,8 +10,9 @@
 #include <sstream>
 #include <functional>
 #include <unordered_map>
-#include "ValueType.h"
 #include <rttr/registration>
+#include "ValueType.h"
+#include "CommandNode.h"
 
 namespace NextHydro {
 
@@ -101,6 +102,12 @@ namespace NextHydro {
                 .method("size", &NextHydro::Mat4x4::size)
                 .method("alignment", &NextHydro::Mat4x4::alignment)
                 .method("getBufferFromJson", &NextHydro::Mat4x4::getBufferFromJson);
+
+//        rttr::registration::class_<NextHydro::ComputePass>("ComputePass")
+//                .constructor<std::string&, std::array<unsigned int, 3>&>()
+//                .property("shader", &NextHydro::ComputePass::shader);
+//                .property("groupCounts", &NextHydro::ComputePass::groupCounts);
+
     };
 }
 

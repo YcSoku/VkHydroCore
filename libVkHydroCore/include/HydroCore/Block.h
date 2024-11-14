@@ -20,7 +20,6 @@ namespace NextHydro {
         size_t size;
         std::unique_ptr<char[]> buffer;
 
-        Block(const std::vector<std::string>& typeList, const std::vector<float_t>& data);
         Block(const Json& typeList, const Json& jsonData);
     };
 }

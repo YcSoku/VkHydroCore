@@ -10,14 +10,9 @@
 #include <stdexcept>
 #include <vulkan/vulkan.h>
 #include "config.h"
+#include "Types.h"
 
 namespace NextHydro {
-
-    union Flag {
-        char        c[4];
-        float       f;
-        uint32_t    u;
-    };
 
     struct ScopedMemoryMapping {
 
