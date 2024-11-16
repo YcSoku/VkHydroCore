@@ -36,11 +36,9 @@ namespace NextHydro {
         VkQueue                             computeQueue                    =   VK_NULL_HANDLE;
         VkDescriptorPool                    descriptorPool                  =   VK_NULL_HANDLE;
         VkPhysicalDevice                    physicalDevice                  =   VK_NULL_HANDLE;
-        VkFence                             computeInFlightFences           =   VK_NULL_HANDLE;
-        VkSemaphore                         computeFinishedSemaphores       =   VK_NULL_HANDLE;
 
-        std::vector<VkFence>                                                fences;
         std::vector<std::unique_ptr<ICommandNode>>                          flowNode_list;
+        std::vector<VkFence>                                                fences;
         std::vector<VkCommandBuffer>                                        commandBuffers;
         std::vector<VkDescriptorSet>                                        descriptorSetPool;
         std::vector<VkCopyDescriptorSet>                                    descriptorCopySets;
@@ -56,20 +54,17 @@ namespace NextHydro {
         ~Core();
 
         // Running Mode <Script-Framework> [ parse -> run ]
-        void                                parseScript(const fs::path& path);
+        void                                parseScript(const std::string& path);
         void                                runScript();
 
         // TODO: Implement running mode with simulation-framework
         // Running Mode <Simulation-Framework> [ initialization -> step -> ... -> step -> output ]
-        void                                initialization(const fs::path& path);
+        void                                initialization(const std::string& path);
         void                                output();
-        void                                step();
+        bool                                step();
 
-        // Basic Operation for Submit [ preheat -> begin -> end -> submit ]
-        VkCommandBuffer                     commandBegin();
-        void                                commandEnd();
-        void                                preheat();
-        void                                submit();
+        // Command Node execution
+        void                                executeNode(ICommandNode* node);
 
         // Basic Operation for Computation
         void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
@@ -96,6 +91,12 @@ namespace NextHydro {
         void                                setupDebugMessenger();
         void                                createLogicalDevice();
         void                                createCommandBuffer();
+
+        // Basic Operation for Node execution [ preheat -> begin -> end -> submit ]
+        VkCommandBuffer                     commandBegin();
+        void                                commandEnd();
+        void                                preheat();
+        void                                submit();
     };
 }
 #endif //VKHYDROCORE_CORE_H

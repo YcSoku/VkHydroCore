@@ -5,6 +5,7 @@
 #ifndef HYDROCOREPLAYER_COMMANDNODE_H
 #define HYDROCOREPLAYER_COMMANDNODE_H
 
+#include <utility>
 #include <vector>
 #include <string>
 #include <cassert>
@@ -27,11 +28,12 @@ namespace NextHydro {
         {}
     };
     struct ICommandNode {
+        std::string                                 name;
         const VkDevice&                             device;
         std::vector<std::shared_ptr<ComputePass>>   passes;
 
-        explicit ICommandNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes)
-                : device(_device), passes(passes)
+        explicit ICommandNode(std::string _name, const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes)
+                : name(std::move(_name)), device(_device), passes(passes)
         {}
 
         virtual bool isComplete() = 0;
@@ -45,8 +47,8 @@ namespace NextHydro {
         size_t count;
         size_t currentFrame = 0;
 
-        IterableCommandNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, size_t count)
-                : ICommandNode(_device, passes), count(count)
+        IterableCommandNode(std::string _name, const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, size_t count)
+                : ICommandNode(std::move(_name), _device, passes), count(count)
         {}
 
         void tick() override {}
@@ -72,8 +74,8 @@ namespace NextHydro {
         Buffer*                                         stagingBuffer;
         std::function<void(const VkCommandBuffer&)>     postProcessFunc;
 
-        PollableCommandNode(const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, Buffer* _stagingBuffer, const std::string& operation, size_t _flagIndex, float_t _threshold, bool isDiscrete)
-                : ICommandNode(_device, passes), flagBuffer(_flagBuffer), stagingBuffer(_stagingBuffer), flagIndex(_flagIndex), threshold(_threshold), flag({.f = 0.0})
+        PollableCommandNode(std::string _name, const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, Buffer* _stagingBuffer, const std::string& operation, size_t _flagIndex, float_t _threshold, bool isDiscrete)
+                : ICommandNode(std::move(_name), _device, passes), flagBuffer(_flagBuffer), stagingBuffer(_stagingBuffer), flagIndex(_flagIndex), threshold(_threshold), flag({.f = 0.0})
         {
             flag.f = 0.0;
             if (operation == "less") {

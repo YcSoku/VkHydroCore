@@ -52,8 +52,6 @@ namespace NextHydro {
             create(physicalDevice, usage, properties);
         }
         ~Buffer() {
-            vkDestroyBuffer(m_device, buffer, nullptr);
-            vkFreeMemory(m_device, memory, nullptr);
         }
 
         void writeData(char* pData) {

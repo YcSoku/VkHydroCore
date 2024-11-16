@@ -14,11 +14,13 @@ int main() {
     auto core = new NH::Core();
 
     // Parse and run script
-    core->parseScript(jsonPath.c_str());
+//    core->parseScript(jsonPath.c_str());
+//    core->runScript();
 
+    core->initialization(jsonPath);
     auto start = std::chrono::high_resolution_clock::now();
 
-    core->runScript();
+    while(core->step());
 
     std::cout << "\n==================== Computation Complete ====================" << std::endl;
     auto end = std::chrono::high_resolution_clock::now();

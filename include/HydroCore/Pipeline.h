@@ -106,9 +106,7 @@ namespace NextHydro {
         ~ShaderModule() {
 
             delete reflector;
-            if (module != VK_NULL_HANDLE) {
-                vkDestroyShaderModule(m_device, module, nullptr);
-            }
+            reflector = nullptr;
         }
 
         VkPipelineShaderStageCreateInfo getShaderStageCreateInfo() {
@@ -220,7 +218,6 @@ namespace NextHydro {
         size_t                                      commandBufferIndex      =           0;
         VkPipeline                                  pipeline                =           VK_NULL_HANDLE;
         VkPipelineLayout                            pipelineLayout          =           VK_NULL_HANDLE;
-        VkDescriptorPool                            descriptorPool          =           VK_NULL_HANDLE;
         std::unordered_map<DescriptorKey, size_t>   descriptorMap;
         std::vector<VkDescriptorSet>                descriptorSets;
         std::vector<VkWriteDescriptorSet>           descriptorSetWrite;
@@ -229,24 +226,6 @@ namespace NextHydro {
         std::vector<std::array<uint32_t, 2>>        bindingResourceInfo;
 
         ~IPipeline() {
-
-            if (descriptorPool != VK_NULL_HANDLE) {
-                vkDestroyDescriptorPool(m_device, descriptorPool, nullptr);
-            }
-
-            for (const auto& layout : descriptorSetLayout) {
-                if (layout != VK_NULL_HANDLE) {
-                    vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
-                }
-            }
-
-            if (pipelineLayout != VK_NULL_HANDLE) {
-                vkDestroyPipelineLayout(m_device, pipelineLayout, nullptr);
-            }
-
-            if (pipeline != VK_NULL_HANDLE) {
-                vkDestroyPipeline(m_device, pipeline, nullptr);
-            }
         }
 
         size_t findDescriptorSetWriteIndex(uint32_t dstSet, uint32_t dstBinding) {

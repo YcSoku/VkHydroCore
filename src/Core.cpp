@@ -54,12 +54,12 @@ namespace NextHydro {
         return buffer;
     }
 
-    Json readJsonFile(const fs::path& jsonPath) {
+    Json readJsonFile(const std::string& jsonPath) {
 
         std::ifstream f(jsonPath);
 
         if (!f) {
-            throw std::runtime_error("failed to open JSON file: " + jsonPath.string());
+            throw std::runtime_error("failed to open JSON file: " + jsonPath);
         }
 
         return Json::parse(f);
@@ -264,18 +264,61 @@ namespace NextHydro {
         pickPhysicalDevice();
         createLogicalDevice();
         createCommandPool();
-        createSyncObjects();
     }
 
     Core::~Core() {
 
+        // Destruct pipelines
+        for (const auto& pipeline : name_pipeline_map) {
+            auto module = pipeline.second->computeShaderModule->module;
+            if (module != VK_NULL_HANDLE) {
+                vkDestroyShaderModule(device, module, nullptr);
+            }
+
+            for (const auto& layout : pipeline.second->descriptorSetLayout) {
+                if (layout != VK_NULL_HANDLE) {
+                    vkDestroyDescriptorSetLayout(device, layout, nullptr);
+                }
+            }
+
+            if (pipeline.second->pipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device, pipeline.second->pipelineLayout, nullptr);
+            }
+
+            if (pipeline.second->pipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, pipeline.second->pipeline, nullptr);
+            }
+        }
+
+        // Destruct buffers
+        for (const auto& buffer : name_buffer_map) {
+
+            vkDestroyBuffer(device, buffer.second->buffer, nullptr);
+            vkFreeMemory(device, buffer.second->memory, nullptr);
+        }
+
+        // Destruct fences
+        for (auto& fence : fences) {
+            vkDestroyFence(device, fence, nullptr);
+        }
+
+        // Destruct command buffer
+        vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+
+        // Destruct descriptor set
+        vkFreeDescriptorSets(device, descriptorPool, static_cast<uint32_t>(descriptorSetPool.size()), descriptorSetPool.data());
+
+        // Destruct descriptor pool
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
+        // Destruct logical device
         vkDestroyDevice(device, nullptr);
 
 #ifdef ENABLE_VALIDATION_LAYER
         DestroyDebugUtilsMessengerEXT(instance, m_debugMessenger, nullptr);
 #endif
+
+        // Destruct instance
         vkDestroyInstance(instance, nullptr);
     }
 
@@ -294,7 +337,7 @@ namespace NextHydro {
                 .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
                 .pEngineName = "VKHydroCoreEngine",
                 .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                .apiVersion = VK_API_VERSION_1_2
+                .apiVersion = VK_API_VERSION_1_3
         };
 
         auto extensions = getRequiredExtensions();
@@ -382,9 +425,10 @@ namespace NextHydro {
         atomicFloatFeatures.shaderBufferFloat32AtomicAdd = VK_TRUE;
         atomicFloatFeatures.shaderBufferFloat32Atomics = VK_TRUE;
 
-        VkPhysicalDeviceFeatures2 deviceFeatures2{};
-        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        deviceFeatures2.pNext = &atomicFloatFeatures;
+        VkPhysicalDeviceFeatures2 deviceFeatures2 = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                .pNext = &atomicFloatFeatures
+        };
 
         VkDeviceCreateInfo createInfo = {
                 .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -392,8 +436,7 @@ namespace NextHydro {
                 .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
                 .pQueueCreateInfos = queueCreateInfos.data(),
                 .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
-                .ppEnabledExtensionNames = deviceExtensions.data(),
-//                .pEnabledFeatures = &deviceFeatures
+                .ppEnabledExtensionNames = deviceExtensions.data()
         };
 
 #ifdef ENABLE_VALIDATION_LAYER
@@ -475,22 +518,6 @@ namespace NextHydro {
             throw std::runtime_error("failed to allocate compute command buffers!");
         }
         commandBuffers.emplace_back(commandBuffer);
-    }
-
-    void Core::createSyncObjects() {
-
-        VkSemaphoreCreateInfo semaphoreInfo = {
-                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-        };
-
-        VkFenceCreateInfo fenceInfo = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-
-        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores) != VK_SUCCESS || vkCreateFence(device, &fenceInfo, nullptr, &computeInFlightFences) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create compute synchronization objects for a frame!");
-        }
     }
 
     void Core::createFence() {
@@ -622,7 +649,7 @@ namespace NextHydro {
         vkUpdateDescriptorSets(device, descriptorWriteSets.size(), descriptorWriteSets.data(), descriptorCopySets.size(), descriptorCopySets.data());
     }
 
-    void Core::parseScript(const fs::path& path) {
+    void Core::parseScript(const std::string& path) {
 
         // Read json
         Json script = readJsonFile(path);
@@ -818,6 +845,7 @@ namespace NextHydro {
 
         // Create flowNodes
         for (const auto& nodeInfo : flow) {
+            std::string nodeName = nodeInfo["nodeName"];
             std::vector<std::string> passNames = nodeInfo["passes"];
             std::vector<std::shared_ptr<ComputePass>> passPointers(passNames.size());
             for (size_t i = 0; i < passNames.size(); ++i) {
@@ -826,7 +854,7 @@ namespace NextHydro {
             switch (nodeInfo["type"].get<size_t>()) {
                 case 0b01:{
                     size_t count = nodeInfo["count"];
-                    flowNode_list.emplace_back(std::make_unique<IterableCommandNode>(device, passPointers, count));
+                    flowNode_list.emplace_back(std::make_unique<IterableCommandNode>(nodeName, device, passPointers, count));
                     break;
                 }
                 case 0b11: {
@@ -842,7 +870,7 @@ namespace NextHydro {
                         name_buffer_map.emplace(bufferName, std::shared_ptr<Buffer>(buffer));
                     }
 
-                    flowNode_list.emplace_back(std::make_unique<PollableCommandNode>(device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
+                    flowNode_list.emplace_back(std::make_unique<PollableCommandNode>(nodeName, device, passPointers, flagBuffer, buffer, operation, flagIndex, flag, isDiscrete));
                     break;
                 }
             }
@@ -858,16 +886,8 @@ namespace NextHydro {
             node->tick();
 
             while(!node->isComplete()) {
-                preheat();
-                auto commandBuffer = commandBegin();
 
-                for (const auto& pass: node->passes) {
-                    Core::dispatch(commandBuffer, name_pipeline_map[pass->shader].get(), pass->groupCounts);
-                }
-                node->postProcess(commandBuffer);
-
-                commandEnd();
-                submit();
+                executeNode(node.get());
 
                 buffer->readFlag(flag, 0);
                 std::cout << "Dt: " << float(flag.u) / 10000.0 << std::endl;
@@ -878,7 +898,67 @@ namespace NextHydro {
         idle();
     }
 
-    void Core::initialization(const fs::path& path) {
+    void Core::executeNode(ICommandNode* node) {
 
+        preheat();
+        auto commandBuffer = commandBegin();
+
+        for (const auto& pass: node->passes) {
+            Core::dispatch(commandBuffer, name_pipeline_map[pass->shader].get(), pass->groupCounts);
+        }
+        node->postProcess(commandBuffer);
+
+        commandEnd();
+        submit();
+    }
+
+    void Core::initialization(const std::string& path) {
+
+        // Parse script first
+        parseScript(path);
+
+        // Find，run and remove initialization node
+        // Command Node<__INIT__> can be non-unique, but must be ordered
+        std::string nodeName = "__INIT__";
+        auto deleteBegin = std::remove_if(
+                flowNode_list.begin(),
+                flowNode_list.end(),
+                [this, &nodeName](const std::unique_ptr<ICommandNode>& node) -> bool {
+                    if (node->name == nodeName) {
+                        executeNode(node.get());
+                        return true;
+                    }
+                    return false;
+                }
+        );
+        flowNode_list.erase(deleteBegin, flowNode_list.end());
+    }
+
+    bool Core::step() {
+
+        // Run Command Node<__STEP__>
+        Flag flag{ .f = 0.0 };
+        const auto buffer = name_buffer_map["scalars"];
+        for (const auto& node : flowNode_list) {
+            executeNode(node.get());
+        }
+
+        buffer->readFlag(flag, 0);
+        std::cout << "Dt: " << float(flag.u) / 10000.0 << std::endl;
+
+        // Remove node if it is completed
+        flowNode_list.erase(
+                std::remove_if(
+                        flowNode_list.begin(),
+                        flowNode_list.end(),
+                        [](const auto& node) -> bool {
+                            return node->isComplete();
+                        }
+                ),
+                flowNode_list.end()
+        );
+
+        // Return false if no node exists
+        return !flowNode_list.empty();
     }
 }
