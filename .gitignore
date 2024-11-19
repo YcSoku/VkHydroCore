@@ -5,4 +5,4 @@ resource
 .idea
 .DS_Store
 
-res/run.hcs.org.json
+test/res/run.hcs.org.json
