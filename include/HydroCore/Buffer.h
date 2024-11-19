@@ -109,12 +109,11 @@ namespace NextHydro {
             if          (usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             else if     (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
-            VkBufferCreateInfo bufferInfo = {
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                    .size = size,
-                    .usage = usage,
-                    .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-            };
+            VkBufferCreateInfo bufferInfo {};
+            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.size = size;
+            bufferInfo.usage = usage;
+            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
             if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create buffer!");
@@ -123,11 +122,11 @@ namespace NextHydro {
             VkMemoryRequirements memRequirements;
             vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
-            VkMemoryAllocateInfo allocInfo = {
-                    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                    .allocationSize = memRequirements.size,
-                    .memoryTypeIndex = Buffer::findMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties),
-            };
+            VkMemoryAllocateInfo allocInfo;
+            allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.allocationSize = memRequirements.size;
+            allocInfo.memoryTypeIndex = Buffer::findMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties);
+            allocInfo.pNext = nullptr;
 
             if (vkAllocateMemory(m_device, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
                 throw std::runtime_error("failed to allocate buffer memory");
@@ -135,11 +134,9 @@ namespace NextHydro {
 
             vkBindBufferMemory(m_device, buffer, memory, 0);
 
-            descriptorBufferInfo = {
-                .buffer = buffer,
-                .offset = 0,
-                .range = size
-            };
+            descriptorBufferInfo.buffer = buffer;
+            descriptorBufferInfo.offset = 0;
+            descriptorBufferInfo.range = size;
         }
     };
 }

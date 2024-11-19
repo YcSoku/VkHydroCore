@@ -16,9 +16,6 @@ namespace NextHydro {
         size_t offset = 0;
 
         for (const auto& typeName : typeList) {
-//            auto typeInfo = typeInfoMap[type];
-//            auto size = typeInfo.first;
-//            auto alignment = typeInfo.second;
 
             auto type = rttr::type::get_by_name(typeName);
             size_t typeSize = type.get_method("size").invoke({}).get_value<size_t>();

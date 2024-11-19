@@ -268,21 +268,19 @@ namespace NextHydro {
             computeShaderModule->generateDescriptorSetLayout(descriptorSetLayout);
 
             // Create pipeline layout
-            VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
-                    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                    .setLayoutCount = static_cast<uint32_t>(descriptorSetLayout.size()),
-                    .pSetLayouts = descriptorSetLayout.data()
-            };
+            VkPipelineLayoutCreateInfo pipelineLayoutInfo {};
+            pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(descriptorSetLayout.size());
+            pipelineLayoutInfo.pSetLayouts = descriptorSetLayout.data();
             if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create compute pipeline layout!");
             }
 
             // Create pipeline
-            VkComputePipelineCreateInfo pipelineInfo = {
-                    .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                    .stage = computeShaderModule->getShaderStageCreateInfo(),
-                    .layout = pipelineLayout
-            };
+            VkComputePipelineCreateInfo pipelineInfo = {};
+            pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+            pipelineInfo.stage = computeShaderModule->getShaderStageCreateInfo();
+            pipelineInfo.layout = pipelineLayout;
             if (vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create compute pipeline!");
             }
