@@ -1,7 +1,8 @@
 cmake-build-debug
 cmake-build-release
 build
-resource/
-res/
+resource
 .idea
 .DS_Store
+
+res/run.hcs.org.json

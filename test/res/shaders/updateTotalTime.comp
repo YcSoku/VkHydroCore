@@ -1,0 +1,17 @@
+#version 450
+
+layout(set = 0, binding = 0, std140) buffer scalarBuffer {
+    uint dt;
+    float Flag;
+    float total_time;
+} scalars;
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+
+    // Tick total_time
+    float f_dt = float(scalars.dt) / 10000.0;
+    scalars.total_time += f_dt;
+    scalars.dt = 10000000;
+}

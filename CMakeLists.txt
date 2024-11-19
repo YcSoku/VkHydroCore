@@ -66,9 +66,20 @@ list(APPEND LIBS ${Vulkan_LIBRARIES})
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.h.in
         ${INCLUDE_OUTPUT_DIR}/config.h)
 
-# spirv-reflect
+# Make options for dependencies
+set(BUILD_TESTING OFF CACHE BOOL    "Disable testing")
+set(BUILD_EXAMPLES OFF CACHE BOOL   "Disable RTTR examples")
+set(BUILD_UNIT_TESTS OFF CACHE BOOL "Disable RTTR unit tests")
+option(SHADERC_SKIP_TESTS           "Skip building tests" ON)
+option(SHADERC_SKIP_EXAMPLES        "Skip building examples" ON)
+OPTION(SPIRV_HEADERS_SKIP_EXAMPLES  "Skip building examples" ON)
+OPTION(SPIRV_REFLECT_BUILD_TESTS    "Build SPIRV-Reflect tests" OFF)
+OPTION(SPIRV_REFLECT_BUILD_EXAMPLES "Build SPIRV-Reflect examples" OFF)
 OPTION(SPIRV_REFLECT_EXECUTABLE     "Build spirv-reflect executable" OFF)
 OPTION(SPIRV_REFLECT_STATIC_LIB     "Build a SPIRV-Reflect static library" ON)
+option(SPIRV_SKIP_EXECUTABLES       "Skip building the executable and tests along with the library" ON)
+
+# spirv-reflect
 FetchContent_Declare(
         SPIRV-Reflect
         GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Reflect.git
@@ -98,7 +109,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(spirv-headers spirv-tools glslang)
 
 # shaderc
-option(SHADERC_SKIP_TESTS "Skip shaderc tests" ON)
 FetchContent_Declare(
         shaderc
         GIT_REPOSITORY https://github.com/google/shaderc.git
@@ -133,20 +143,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 list(APPEND LIBS nlohmann_json::nlohmann_json)
 
-# Pybind11
-FetchContent_Declare(
-        pybind11
-        GIT_REPOSITORY https://github.com/pybind/pybind11.git
-        GIT_TAG v2.11.1
-)
-FetchContent_MakeAvailable(pybind11)
-list(APPEND LIBS pybind11::module)
-
 # RTTR
-find_package(RTTR CONFIG REQUIRED Core)
+FetchContent_Declare(
+        rttr
+        GIT_REPOSITORY https://github.com/rttrorg/rttr.git
+        GIT_TAG        v0.9.6
+)
+FetchContent_MakeAvailable(rttr)
 list(APPEND LIBS RTTR::Core)
 
-# Find cpp files
+# -- Add VkHydroCore target --
 file(GLOB_RECURSE CPP_FILES ${SOURCE_DIR}/*.cpp)
 
 add_library(${PROJECT_NAME}
@@ -164,35 +170,8 @@ target_include_directories(${PROJECT_NAME}
         ${Vulkan_INCLUDE_DIRS}
 )
 
-# -- Add pybind11 module --
-set(PYTHON_MODULE_NAME "pyHydroCore")
-file(GLOB_RECURSE PYBIND_FILES ${CMAKE_SOURCE_DIR}/pybinding/*.cpp)
-pybind11_add_module(${PYTHON_MODULE_NAME} ${PYBIND_FILES})
-
-message(STATUS "Pybind11 include directory: ${pybind11_INCLUDE_DIR}")
-target_link_libraries(${PYTHON_MODULE_NAME}
-        PUBLIC
-        pybind11::module
-        ${PROJECT_NAME}
-)
-
 # -- Add test target --
-# Set up test sources
-file(GLOB_RECURSE TEST_FILES ${CMAKE_SOURCE_DIR}/test/src/*.cpp)
-message(STATUS "Test files: ${TEST_FILES}")
+add_subdirectory("${CMAKE_SOURCE_DIR}/test")
 
-# Create the test executable
-set(TEST_PROJECT_NAME "${PROJECT_NAME}Demo")
-add_executable(${TEST_PROJECT_NAME} ${TEST_FILES})
-
-# Link the test executable with the necessary libraries
-target_link_libraries(${TEST_PROJECT_NAME}
-        PRIVATE
-        ${PROJECT_NAME}
-)
-target_include_directories(${TEST_PROJECT_NAME}
-        PRIVATE
-        ${INCLUDE_DIR}
-        ${INCLUDE_OUTPUT_DIR}
-        ${Vulkan_INCLUDE_DIRS}
-)
+# -- Add pybind11 module --
+add_subdirectory("${CMAKE_SOURCE_DIR}/python")

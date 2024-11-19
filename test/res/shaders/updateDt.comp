@@ -1,0 +1,47 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+
+layout(set = 0, binding = 0, std140) buffer dt3Buffer {
+    float dt3[];
+};
+
+layout(set = 0, binding = 1, std140) uniform constantBlock {
+    uint res_x;
+    uint res_y;
+    float h_min;
+    float g;
+    float n;
+    float dx;
+    float dy;
+    float afa;
+    float sita;
+    float u;
+} constants;
+
+layout(set = 0, binding = 2, std140) buffer scalarBuffer {
+    uint dt;
+    float Flag;
+    float total_time;
+    float current_time;
+} scalars;
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+uint getIndexFrom_(uint u, uint v) {
+
+    return v * (constants.res_x + 1) + u;
+}
+
+void main() {
+
+    // Validate invocation
+    uint globalX = gl_GlobalInvocationID.x;
+    uint globalY = gl_GlobalInvocationID.y;
+    if (any(bvec4(globalX == 0, globalX >= constants.res_x, globalY == 0, globalY >= constants.res_y))) return;
+
+    uint index = getIndexFrom_(globalX, globalY);
+    uint u_dt3 = uint(dt3[index] * 10000.0);
+
+    if (u_dt3 == 0) return;
+    atomicMin(scalars.dt, u_dt3);
+}

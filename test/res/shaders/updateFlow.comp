@@ -1,0 +1,117 @@
+#version 450
+
+layout(set = 0, binding = 0, std140) buffer zBuffer {
+    float z[];
+};
+
+layout(set = 0, binding = 1, std140) buffer qxBuffer {
+    float q_x[];
+};
+
+layout(set = 0, binding = 2, std140) buffer qyBuffer {
+    float q_y[];
+};
+
+layout(set = 0, binding = 3, std140) buffer qnxBuffer {
+    float qn_x[];
+};
+
+layout(set = 0, binding = 4, std140) buffer qnyBuffer {
+    float qn_y[];
+};
+
+layout(set = 0, binding = 5, std140) buffer hBuffer {
+    float h[];
+};
+
+layout(set = 0, binding = 6, std140) buffer hnBuffer {
+    float hn[];
+};
+
+layout(set = 0, binding = 7, std140) buffer iddxBuffer {
+    float id_dx[];
+};
+
+layout(set = 0, binding = 8, std140) buffer iddyBuffer {
+    float id_dy[];
+};
+
+layout(set = 0, binding = 9, std140) buffer dt3Buffer {
+    float dt3[];
+};
+
+layout(set = 0, binding = 10, std140) uniform constantBlock {
+    uint res_x;
+    uint res_y;
+    float h_min;
+    float g;
+    float n;
+    float dx;
+    float dy;
+    float afa;
+    float sita;
+    float u;
+} constants;
+
+layout(set = 0, binding = 11, std140) buffer scalarBuffer {
+    uint dt;
+    float Flag;
+    float total_time;
+    float current_time;
+} scalars;
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+uint getIndexFrom_(uint u, uint v) {
+
+    return v * (constants.res_x + 1) + u;
+}
+
+void main() {
+
+    // Validate invocation
+    uint globalX = gl_GlobalInvocationID.x;
+    uint globalY = gl_GlobalInvocationID.y;
+    if (any(bvec4(globalX == 0, globalX >= constants.res_x + 1, globalY == 0, globalY >= constants.res_y + 1))) return;
+
+    float f_dt = float(scalars.dt) / 10000.0;
+
+    // Get subWatershed
+    //                 uSubWatershed
+    //                       |
+    // lSubWatershed -- subWatershed -- rSubWatershed
+    //                       |
+    //                 bSubWatershed
+    uint index = getIndexFrom_(globalX, globalY);
+    uint lIndex = getIndexFrom_(globalX - 1, globalY);
+    uint rIndex = getIndexFrom_(globalX + 1, globalY);
+    uint uIndex = getIndexFrom_(globalX, globalY + 1);
+    uint bIndex = getIndexFrom_(globalX, globalY - 1);
+
+    // Tick q_x of subWatershed
+    float dt1 = 0.2;
+    float hf_x = max(h[index], h[lIndex]) - max(z[index], z[lIndex]);
+
+    float q1 = -constants.g * max(hf_x, 0.0) * f_dt * (hn[index] - hn[lIndex]) / constants.dx;
+    float q2 = 1.0 + constants.g * f_dt * constants.n * constants.n * abs(qn_x[index] / pow(max(hf_x, 0.00001), 7.0 / 3.0));
+
+    q_x[index] = (constants.sita * qn_x[index] + (1.0 - constants.sita) / 2.0 * (qn_x[lIndex] + qn_x[rIndex]) + q1) / q2;
+    q_x[index] *= id_dx[index];
+    q_x[index] *= max((hf_x - constants.h_min) / (abs(hf_x - constants.h_min) + 0.00001), 0.0);
+
+    // Tick q_y of subWatershed
+    float dt2 = 0.2;
+    float hf_y = max(h[index], h[bIndex]) - max(z[index], z[bIndex]);
+
+    float q3 = -constants.g * max(hf_y, 0.0) * f_dt * (hn[index] - hn[bIndex]) / constants.dy;
+    float q4 = 1.0 + constants.g * f_dt * constants.n * constants.n * abs(qn_y[index] / (pow(max(hf_y, 0.00001), 7.0 / 3.0)));
+
+    q_y[index] = (constants.sita * qn_y[index] + (1.0 - constants.sita) / 2.0 * (qn_y[uIndex] + qn_y[bIndex]) + q3) / q4;
+    q_y[index] *= id_dy[index];
+    q_y[index] *= max((hf_y - constants.h_min) / (abs(hf_y - constants.h_min) + 0.00001), 0.0);
+
+    // Tick dt3 of subWatershed
+    dt1 = constants.afa * constants.dx / (sqrt(constants.g * max(hf_x, 0.01)) + abs(q_x[index]) / max(hf_x, 0.01));
+    dt2 = constants.afa * constants.dy / (sqrt(constants.g * max(hf_y, 0.01)) + abs(q_y[index]) / max(hf_y, 0.01));
+    dt3[index] = min(dt1, dt2);
+}

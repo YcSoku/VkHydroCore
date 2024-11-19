@@ -1,0 +1,42 @@
+#version 450
+
+layout(set = 0, binding = 0, std140) buffer hBuffer {
+    float h[];
+};
+
+layout(set = 0, binding = 1, std140) buffer hnBuffer {
+    float hn[];
+};
+
+layout(set = 0, binding = 2, std140) uniform constantBlock {
+    uint res_x;
+    uint res_y;
+    float h_min;
+    float g;
+    float n;
+    float dx;
+    float dy;
+    float afa;
+    float sita;
+    float u;
+} constants;
+
+layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+uint getIndexFrom_(uint u, uint v) {
+
+    return v * (constants.res_x + 1) + u;
+}
+
+void main() {
+
+    // Validate invocation
+    uint globalX = gl_GlobalInvocationID.x;
+    uint globalY = gl_GlobalInvocationID.y;
+    if (globalX >= constants.res_x) return;
+
+    // Update boundary height
+    uint index = getIndexFrom_(globalX, 0);
+    h[index] = 2.0;
+    hn[index] = 2.0;
+}

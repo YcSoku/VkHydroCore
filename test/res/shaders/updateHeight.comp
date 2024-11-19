@@ -1,0 +1,97 @@
+#version 450
+
+layout(set = 0, binding = 0, std140) buffer qxBuffer {
+    float q_x[];
+};
+
+layout(set = 0, binding = 1, std140) buffer qyBuffer {
+    float q_y[];
+};
+
+layout(set = 0, binding = 2, std140) buffer qnxBuffer {
+    float qn_x[];
+};
+
+layout(set = 0, binding = 3, std140) buffer qnyBuffer {
+    float qn_y[];
+};
+
+layout(set = 0, binding = 4, std140) buffer hBuffer {
+    float h[];
+};
+
+layout(set = 0, binding = 5, std140) buffer hnBuffer {
+    float hn[];
+};
+
+layout(set = 0, binding = 6, std140) uniform constantBlock {
+    uint res_x;
+    uint res_y;
+    float h_min;
+    float g;
+    float n;
+    float dx;
+    float dy;
+    float afa;
+    float sita;
+    float u;
+} constants;
+
+layout(set = 0, binding = 7, std140) buffer scalarBuffer {
+    uint dt;
+    float Flag;
+    float total_time;
+    float current_time;
+} scalars;
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+uint getIndexFrom_(uint u, uint v) {
+
+    return v * (constants.res_x + 1) + u;
+}
+
+void main() {
+
+    // Validate invocation
+    uint globalX = gl_GlobalInvocationID.x;
+    uint globalY = gl_GlobalInvocationID.y;
+
+    // Tick q_y and qn_y for boundaries
+    // ("globalY == 0" means these operations only need to be excuted for one time)
+    if (globalY == 0 && globalX >= 1 && globalX < constants.res_x) {
+        uint oneYIndex = getIndexFrom_(globalX, 1);
+        uint zeroYIndex = getIndexFrom_(globalX, 0);
+        uint resYIndex = getIndexFrom_(globalX, constants.res_y);
+        uint uResYIndex = getIndexFrom_(globalX, constants.res_y + 1);
+        uint bResYIndex = getIndexFrom_(globalX, constants.res_y - 1);
+
+        q_y[resYIndex] = q_y[bResYIndex];
+        q_y[uResYIndex] = q_y[bResYIndex];
+        qn_y[resYIndex] = q_y[resYIndex];
+        qn_y[uResYIndex] = q_y[uResYIndex];
+        qn_y[zeroYIndex] = q_y[oneYIndex];
+    }
+
+    // Tick h, hn, qn_x, and qn_y
+    if (any(bvec4(globalX == 0, globalX >= constants.res_x, globalY == 0, globalY >= constants.res_y))) return;
+
+    // Get subWatershed
+    //                 uSubWatershed
+    //                       |
+    // lSubWatershed -- subWatershed -- rSubWatershed
+    //                       |
+    //                 bSubWatershed
+    uint index = getIndexFrom_(globalX, globalY);
+    uint uIndex = getIndexFrom_(globalX, globalY + 1);
+    uint rIndex = getIndexFrom_(globalX + 1, globalY);
+
+    // Tick h, hn of subWatershed
+    float f_dt = float(scalars.dt) / 10000.0;
+    float qx = (q_x[index] - q_x[rIndex]) * constants.dy * f_dt;
+    float qy = (q_y[index] - q_y[uIndex]) * constants.dx * f_dt;
+    h[index] = hn[index] + (qx + qy) / (constants.dx * constants.dy);
+    hn[index] = h[index];
+    qn_x[index] = q_x[index];
+    qn_y[index] = q_y[index];
+}

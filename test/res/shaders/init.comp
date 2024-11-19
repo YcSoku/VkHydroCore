@@ -1,0 +1,80 @@
+#version 450
+
+layout(set = 0, binding = 0, std140) buffer zBuffer {
+    float z[];
+};
+
+layout(set = 0, binding = 1, std140) buffer qxBuffer {
+    float q_x[];
+};
+
+layout(set = 0, binding = 2, std140) buffer qyBuffer {
+    float q_y[];
+};
+
+layout(set = 0, binding = 3, std140) buffer qnxBuffer {
+    float qn_x[];
+};
+
+layout(set = 0, binding = 4, std140) buffer qnyBuffer {
+    float qn_y[];
+};
+
+layout(set = 0, binding = 5, std140) buffer hBuffer {
+    float h[];
+};
+
+layout(set = 0, binding = 6, std140) buffer iddxBuffer {
+    float id_dx[];
+};
+
+layout(set = 0, binding = 7, std140) buffer iddyBuffer {
+    float id_dy[];
+};
+
+layout(set = 0, binding = 8, std140) uniform constantBlock {
+    uint res_x;
+    uint res_y;
+    float h_min;
+    float g;
+    float n;
+    float dx;
+    float dy;
+    float afa;
+    float sita;
+    float u;
+} constants;
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+uint getIndexFrom_(uint u, uint v) {
+
+    return v * (constants.res_x + 1) + u;
+}
+
+void main() {
+
+    // Validate invocation
+    uint globalX = gl_GlobalInvocationID.x;
+    uint globalY = gl_GlobalInvocationID.y;
+    if (globalX >= constants.res_x + 1 || globalY >= constants.res_y + 1) return;
+
+    // Get subWatershed
+    uint index = getIndexFrom_(globalX, globalY);
+
+    // Initialize subWatershed
+    z[index] = 0.0;
+    h[index] = 0.0;
+    q_x[index] = 0.0;
+    q_y[index] = 0.0;
+    qn_x[index] = 0.0;
+    qn_y[index] = 0.0;
+    id_dx[index] = 1.0;
+    id_dy[index] = 1.0;
+
+    // Initialize closed boundary signal
+    if ((globalX == 1 || globalX == constants.res_x) && (globalY >= 1 && globalY < constants.res_y)) {
+        id_dx[index] = 0;
+        id_dy[index] = 0;
+    }
+}

@@ -1,0 +1,123 @@
+{
+    "storages": [
+        {
+            "name": "scalars",
+            "resource": [ 10, 1.0, 0.0 ],
+            "layout": [ "U32", "F32", "F32" ]
+        },
+        {
+            "name": "z",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "q_x",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "q_y",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "qn_x",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "qn_y",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "h",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "hn",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "id_dx",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "id_dy",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        },
+        {
+            "name": "dt3",
+            "resource": { "length": 802401 },
+            "layout": "F32"
+        }
+    ],
+    "uniforms": [
+        {
+            "name": "constants",
+            "resource": [ 400, 2000, 0.02, 9.8, 0.03, 5.0, 5.0, 0.7, 0.8, 0.635 ],
+            "layout": [ "U32", "U32", "F32", "F32", "F32", "F32", "F32", "F32", "F32", "F32" ]
+        }
+    ],
+    "pipelines": [
+        { "name": "init", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/init.comp" },
+        { "name": "updateDt", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/updateDt.comp" },
+        { "name": "updateFlow", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/updateFlow.comp" },
+        { "name": "updateHeight", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/updateHeight.comp" },
+        { "name": "updateTotalTime", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/updateTotalTime.comp" },
+        { "name": "updateBoundaryHeight", "path": "/Users/soku/Desktop/Liquordynamic/VkHydroCore/test/res/shaders/updateBoundaryHeight.comp" }
+    ],
+    "passes": [
+        {
+            "name": "initPass",
+            "shader": "init",
+            "computeScale": [ 401, 2001, 1 ]
+        },
+        {
+            "name": "boundaryHeightPass",
+            "shader": "updateBoundaryHeight",
+            "computeScale": [ 400, 1, 1 ]
+        },
+        {
+            "name": "flowPass",
+            "shader": "updateFlow",
+            "computeScale": [ 401, 2001, 1 ]
+        },
+        {
+            "name": "heightPass",
+            "shader": "updateHeight",
+            "computeScale": [ 401, 2001, 1 ]
+        },
+        {
+            "name": "updateDtPass",
+            "shader": "updateDt",
+            "computeScale": [ 401, 2001, 1 ]
+        },
+        {
+            "name": "totalTimePass",
+            "shader": "updateTotalTime",
+            "computeScale": [ 1, 1, 1 ]
+        }
+    ],
+    "flow": [
+        {
+            "nodeName": "__INIT__",
+            "passes": [ "initPass" ],
+            "count": 1,
+            "type": 1
+        },
+        {
+            "nodeName": "__STEP__",
+            "passes": [ "boundaryHeightPass", "flowPass", "heightPass", "totalTimePass", "updateDtPass"],
+            "flagBuffer": "scalars",
+            "operation": "lEqual",
+            "flagIndex": 2,
+            "flag": 21600,
+            "type": 3
+        }
+    ]
+}

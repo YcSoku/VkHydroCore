@@ -1,0 +1,64 @@
+package:
+  name: pyhydrocore
+  version: 0.0.1
+
+source:
+  path: .
+  include:
+    - LICENSE
+
+build:
+  number: 0
+  script: |
+    if [ -f LICENSE ]; then
+      cp LICENSE LICENSE.txt
+    fi
+
+    INSTALL_PREFIX=$PREFIX
+
+    mkdir -p build
+    cd build
+
+    cmake .. \
+      -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
+      -DPYTHON_EXECUTABLE=$PYTHON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -G Ninja
+
+    ninja -j4
+    ninja install
+
+
+outputs:
+  - name: pyhydrocore
+    files:
+      - lib/python*/site-packages/pyhydrocore/*
+      - lib/*.so
+
+requirements:
+  build:
+    - cmake
+    - pybind11
+    - python
+    - setuptools
+    - ninja
+  host:
+    - python
+    - pybind11
+  run:
+    - python
+
+test:
+  imports:
+    - pyhydrocore
+  commands:
+    - python -c "import pyhydrocore as hc; print(hc.Core())"
+    - echo "Testing complete."
+  requires:
+    - python
+
+about:
+  home: https://github.com/Liquordynamic/VkHydroCore
+  summary: "C++ library with Python bindings for GPGPU-enhanced hydrodynamic simulation."
+  license: BSD-3-Clause
+  license_file: LICENSE
