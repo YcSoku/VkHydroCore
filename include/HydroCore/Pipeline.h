@@ -109,13 +109,14 @@ namespace NextHydro {
             reflector = nullptr;
         }
 
-        VkPipelineShaderStageCreateInfo getShaderStageCreateInfo() {
-            return {
-                    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                    .stage = static_cast<VkShaderStageFlagBits>(reflector->prototypeModule.shader_stage),
-                    .module = module,
-                    .pName = reflector->prototypeModule.entry_point_name
-            };
+        VkPipelineShaderStageCreateInfo getShaderStageCreateInfo() const {
+
+            VkPipelineShaderStageCreateInfo shaderStageCreateInfo {};
+            shaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            shaderStageCreateInfo.stage = static_cast<VkShaderStageFlagBits>(reflector->prototypeModule.shader_stage);
+            shaderStageCreateInfo.pName = reflector->prototypeModule.entry_point_name;
+            shaderStageCreateInfo.module = module;
+            return shaderStageCreateInfo;
         }
 
         void generateDescriptorSetLayout(std::vector<VkDescriptorSetLayout>& descriptorSetLayout) {
@@ -135,7 +136,7 @@ namespace NextHydro {
                             .pImmutableSamplers = nullptr
                     };
                 }
-                VkDescriptorSetLayoutCreateInfo layoutInfo{};
+                VkDescriptorSetLayoutCreateInfo layoutInfo {};
                 layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
                 layoutInfo.bindingCount = bindingInfo.size();
                 layoutInfo.pBindings = bindingInfo.data();
@@ -146,62 +147,13 @@ namespace NextHydro {
             }
         }
 
-        [[nodiscard]] BufferMemory* fillUniformBlock(const std::string& blockName, const Json& json) const {
-
-            SpvReflectBlockVariable* block;
-            const auto bindings = reflector->prototypeModule.descriptor_bindings;
-            const size_t bindingCount = reflector->prototypeModule.descriptor_binding_count;
-            for (size_t i = 0; i < bindingCount; ++i) {
-                block = &bindings[i].block;
-                if(spvReflectBlockVariableTypeName(block) == blockName) {
-                    break;
-                }
-            }
-
-            auto buffer = new BufferMemory(block->size);
-            const auto& blocksInfo = json["block"];
-
-            for(size_t i = 0; i < block->member_count; ++i) {
-                const auto& blockInfo = blocksInfo[i];
-                const auto& member = block->members[i];
-
-                void* begin = (char*)buffer->bufferMemory + member.offset;
-                switch (type_map[blockInfo["type"].get<std::string>()]) {
-                    case 0: { // f32
-                        auto value = blockInfo["data"].get<float_t>();
-                        std::memcpy(begin, &value, sizeof(float_t));
-                        break;
-                    }
-                    case 1: { // vec2
-                        auto value = blockInfo["data"].get<std::array<float_t, 2>>();
-                        std::memcpy(begin, &value, sizeof(float_t) * 2);
-                        break;
-                    }
-                    case 2: { // vec3
-                        auto value = blockInfo["data"].get<std::array<float_t, 3>>();
-                        std::memcpy(begin, &value, sizeof(float_t) * 3);
-                        break;
-                    }
-                    case 3: { // vec4
-                        auto value = blockInfo["data"].get<std::array<float_t, 4>>();
-                        std::memcpy(begin, &value, sizeof(float_t) * 4);
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
-            return buffer;
-        }
-
     private:
         void createShaderModule(const std::vector<uint32_t >& code) {
 
-            VkShaderModuleCreateInfo createInfo = {
-                    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                    .codeSize = code.size() * sizeof(uint32_t),
-                    .pCode = reinterpret_cast<const uint32_t*>(code.data())
-            };
+            VkShaderModuleCreateInfo createInfo {};
+            createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            createInfo.codeSize = code.size() * sizeof(uint32_t);
+            createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
             if (vkCreateShaderModule(m_device, &createInfo, nullptr, &module) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create shader module!");
@@ -224,9 +176,6 @@ namespace NextHydro {
         std::vector<VkDescriptorSetLayout>          descriptorSetLayout;
         std::vector<std::string>                    bindingResourceNames;
         std::vector<std::array<uint32_t, 2>>        bindingResourceInfo;
-
-        ~IPipeline() {
-        }
 
         size_t findDescriptorSetWriteIndex(uint32_t dstSet, uint32_t dstBinding) {
             DescriptorKey key = { dstSet, dstBinding };
@@ -277,7 +226,7 @@ namespace NextHydro {
             }
 
             // Create pipeline
-            VkComputePipelineCreateInfo pipelineInfo = {};
+            VkComputePipelineCreateInfo pipelineInfo {};
             pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
             pipelineInfo.stage = computeShaderModule->getShaderStageCreateInfo();
             pipelineInfo.layout = pipelineLayout;

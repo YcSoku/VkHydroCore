@@ -1,14 +1,14 @@
 #include <vector>
 #include <chrono>
 #include <iostream>
+#include "TestConfig.h"
 #include "HydroCore/Core.h"
 
 namespace NH = NextHydro;
-
 int main() {
 
     // Script resource
-    fs::path jsonPath = RESOURCE_PATH / fs::path("run.hcs.org.json");
+    fs::path jsonPath = RESOURCE_PATH / fs::path("run.hcs.json");
 
     // Launch GPGPU core
     auto core = new NH::Core();

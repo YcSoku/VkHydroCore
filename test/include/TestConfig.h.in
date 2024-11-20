@@ -1,0 +1,3 @@
+#pragma once
+#define ROOT_PATH "@CMAKE_SOURCE_DIR@"
+#define RESOURCE_PATH "@TEST_RESOURCE_PATH@"

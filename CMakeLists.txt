@@ -156,7 +156,7 @@ list(APPEND LIBS RTTR::Core)
 file(GLOB_RECURSE CPP_FILES ${SOURCE_DIR}/*.cpp)
 
 add_library(${PROJECT_NAME}
-        SHARED
+        STATIC
         ${CPP_FILES}
 )
 target_link_libraries(${PROJECT_NAME}

@@ -10,9 +10,9 @@
 namespace NextHydro {
 
     union Flag {
-        char        c[4];
         float       f;
         uint32_t    u;
+        char        c[4];
     };
 }
 

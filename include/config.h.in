@@ -1,35 +1,4 @@
 #pragma once
-#define ROOT_PATH "@CMAKE_SOURCE_DIR@"
-#define RESOURCE_PATH "@RESOURCE_DIR@"
-#define W_ROOT_PATH L"@CMAKE_SOURCE_DIR@"
-#define SHADER_PATH "@SHADER_BINARY_DIR@"
 
 #cmakedefine ENABLE_VALIDATION_LAYER
 #cmakedefine PLATFORM_NEED_PORTABILITY
-
-#include <unordered_map>
-
-namespace NextHydro {
-
-    struct BufferMemory {
-        size_t size;
-        void* bufferMemory;
-
-        explicit BufferMemory(size_t size)
-        : size(size)
-        {
-            bufferMemory = malloc(size);
-        }
-
-        ~BufferMemory() {
-            free(bufferMemory);
-        }
-    };
-
-    static std::unordered_map<std::string, int> type_map = {
-        {"f32", 0},
-        {"vec2", 1},
-        {"vec3", 2},
-        {"vec4", 3}
-    };
-}

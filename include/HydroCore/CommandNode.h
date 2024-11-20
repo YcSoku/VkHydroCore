@@ -70,12 +70,13 @@ namespace NextHydro {
         Flag                                            flag;
         float_t                                         threshold;
         size_t                                          flagIndex;
+        size_t                                          stagingIndex;
         std::shared_ptr<Buffer>                         flagBuffer;
         Buffer*                                         stagingBuffer;
         std::function<void(const VkCommandBuffer&)>     postProcessFunc;
 
         PollableCommandNode(std::string _name, const VkDevice& _device, const std::vector<std::shared_ptr<ComputePass>>& passes, const std::shared_ptr<Buffer>& _flagBuffer, Buffer* _stagingBuffer, const std::string& operation, size_t _flagIndex, float_t _threshold, bool isDiscrete)
-                : ICommandNode(std::move(_name), _device, passes), flagBuffer(_flagBuffer), stagingBuffer(_stagingBuffer), flagIndex(_flagIndex), threshold(_threshold), flag({.f = 0.0})
+                : ICommandNode(std::move(_name), _device, passes), flagBuffer(_flagBuffer), stagingBuffer(_stagingBuffer), flagIndex(_flagIndex), threshold(_threshold), flag()
         {
             flag.f = 0.0;
             if (operation == "less") {
@@ -92,14 +93,16 @@ namespace NextHydro {
 
             if (isDiscrete) {
                 postProcessFunc = [this](const VkCommandBuffer& commandBuffer) { postProcessForDiscreteGPU(commandBuffer); };
+                stagingIndex = 0;
             } else {
                 postProcessFunc = [](const VkCommandBuffer& commandBuffer) {};
                 stagingBuffer = flagBuffer.get();
+                stagingIndex = flagIndex;
             }
         }
 
         [[nodiscard]] float getData() {
-            stagingBuffer->readFlag(flag, flagIndex * 4);
+            stagingBuffer->readFlag(flag, stagingIndex * 4);
             std::cout << "Total time: " << flag.f << std::endl;
             return flag.f;
         }

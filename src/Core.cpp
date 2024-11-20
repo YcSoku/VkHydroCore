@@ -322,18 +322,17 @@ namespace NextHydro {
         }
 #endif
 
-        VkApplicationInfo appInfo;
+        VkApplicationInfo appInfo {};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "VKHydroCoreEngine";
         appInfo.pApplicationName = "VkHydroCore";
         appInfo.apiVersion = VK_API_VERSION_1_3;
-        appInfo.pNext = nullptr;
 
         auto extensions = getRequiredExtensions();
 
-        VkInstanceCreateInfo createInfo;
+        VkInstanceCreateInfo createInfo {};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
         createInfo.pApplicationInfo = &appInfo;
@@ -401,13 +400,11 @@ namespace NextHydro {
         float queuePriority = 1.0f;
         for (const auto& queueFamily : uniqueQueueFamilies) {
 
-            VkDeviceQueueCreateInfo queueCreateInfo;
+            VkDeviceQueueCreateInfo queueCreateInfo {};
             queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueCreateInfo.pQueuePriorities = &queuePriority;
             queueCreateInfo.queueFamilyIndex = queueFamily;
-            queueCreateInfo.pNext = nullptr;
             queueCreateInfo.queueCount = 1;
-            queueCreateInfo.flags = 0;
 
             queueCreateInfos.emplace_back(queueCreateInfo);
         }
@@ -415,33 +412,31 @@ namespace NextHydro {
         VkPhysicalDeviceFeatures deviceFeatures{};
         memset(&deviceFeatures, 0, sizeof(VkPhysicalDeviceFeatures));
 
-        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures {};
         atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
-        atomicFloatFeatures.pNext = nullptr;
         atomicFloatFeatures.shaderBufferFloat32AtomicAdd = VK_TRUE;
         atomicFloatFeatures.shaderBufferFloat32Atomics = VK_TRUE;
 
-        VkPhysicalDeviceFeatures2 supportedFeatures2{};
+        VkPhysicalDeviceFeatures2 supportedFeatures2 {};
         supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT supportedAtomicFloatFeatures{};
+
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT supportedAtomicFloatFeatures {};
         supportedAtomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
         supportedFeatures2.pNext = &supportedAtomicFloatFeatures;
-        vkGetPhysicalDeviceFeatures2(physicalDevice, &supportedFeatures2);
 
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &supportedFeatures2);
         if (!supportedAtomicFloatFeatures.shaderBufferFloat32AtomicAdd ||
             !supportedAtomicFloatFeatures.shaderBufferFloat32Atomics) {
             throw std::runtime_error("atomic float is not supported on this device.");
         }
 
-        VkDeviceCreateInfo createInfo;
+        VkDeviceCreateInfo createInfo {};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
-        createInfo.pEnabledFeatures = nullptr;
         createInfo.pNext = &atomicFloatFeatures;
-        createInfo.flags = 0;
 
 #ifdef ENABLE_VALIDATION_LAYER
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
@@ -460,33 +455,30 @@ namespace NextHydro {
     void Core::createCommandPool() {
 
         QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
-        VkCommandPoolCreateInfo poolInfo;
+        VkCommandPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.computeFamily.value();
-        poolInfo.pNext = nullptr;
 
         if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create compute command pool");
         }
     }
 
-    void Core::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset) {
+    void Core::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset) const {
 
-        VkCommandBufferAllocateInfo allocInfo;
+        VkCommandBufferAllocateInfo allocInfo {};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandPool = commandPool;
         allocInfo.commandBufferCount = 1;
-        allocInfo.pNext = nullptr;
 
         VkCommandBuffer commandBuffer;
         vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
-        VkCommandBufferBeginInfo beginInfo;
+        VkCommandBufferBeginInfo beginInfo {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        beginInfo.pNext = nullptr;
         vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
         VkBufferCopy copyRegion;
@@ -501,9 +493,6 @@ namespace NextHydro {
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pCommandBuffers = &commandBuffer;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pSignalSemaphores = nullptr;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pNext = nullptr;
 
         vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
         vkQueueWaitIdle(computeQueue);
@@ -512,10 +501,10 @@ namespace NextHydro {
 
     void Core::createCommandBuffer() {
 
-        VkCommandBufferAllocateInfo allocInfo{};
+        VkCommandBufferAllocateInfo allocInfo {};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = commandPool;
         allocInfo.commandBufferCount = 1;
 
         VkCommandBuffer commandBuffer;
@@ -527,10 +516,9 @@ namespace NextHydro {
 
     void Core::createFence() {
 
-        VkFenceCreateInfo fenceInfo;
+        VkFenceCreateInfo fenceInfo {};
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        fenceInfo.pNext = nullptr;
 
         VkFence fence;
         if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
@@ -562,7 +550,7 @@ namespace NextHydro {
         );
     }
 
-    void Core::createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory) {
+    void Core::createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory) const {
 
         auto stagingBuffer = createTempStagingBuffer(blockMemory.size);
         stagingBuffer.writeData(blockMemory.buffer.get());
@@ -575,7 +563,7 @@ namespace NextHydro {
         copyBuffer(stagingBuffer.buffer, uniformBuffer->buffer, blockMemory.size);
     }
 
-    void Core::createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory) {
+    void Core::createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory) const {
 
         auto stagingBuffer = createTempStagingBuffer(blockMemory.size);
         stagingBuffer.writeData(blockMemory.buffer.get());
@@ -598,16 +586,10 @@ namespace NextHydro {
     void Core::submit() {
         const auto& fence = fences[currentFenceIndex++];
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo {};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pCommandBuffers = commandBuffers.data();
         submitInfo.commandBufferCount = currentCommandBufferIndex;
-        submitInfo.pSignalSemaphores = nullptr;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.pNext = nullptr;
 
         if (vkQueueSubmit(computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit compute command buffer!");
@@ -623,10 +605,10 @@ namespace NextHydro {
 
         auto commandBuffer = commandBuffers[currentCommandBufferIndex];
         vkResetCommandBuffer(commandBuffer, 0);
-        VkCommandBufferBeginInfo beginInfo;
+
+        VkCommandBufferBeginInfo beginInfo {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.pNext = nullptr;
-        beginInfo.flags = 0;
+
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording compute command buffer!");
         }
@@ -711,13 +693,11 @@ namespace NextHydro {
                                                               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                                               uniformBufferNum * sizeFactor
                                                       });
-        VkDescriptorPoolCreateInfo poolInfo;
+        VkDescriptorPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
         poolInfo.maxSets = 2 * sizeFactor;
-        poolInfo.pNext = nullptr;
-        poolInfo.flags = 0;
 
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create descriptor pool!");
@@ -736,12 +716,10 @@ namespace NextHydro {
             storageBindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
             storageBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         }
-        VkDescriptorSetLayoutCreateInfo storageLayoutInfo;
+        VkDescriptorSetLayoutCreateInfo storageLayoutInfo {};
         storageLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         storageLayoutInfo.pBindings = storageBindings.data();
         storageLayoutInfo.bindingCount = storageBufferNum;
-        storageLayoutInfo.pNext = nullptr;
-        storageLayoutInfo.flags = 0;
         if (vkCreateDescriptorSetLayout(device, &storageLayoutInfo, nullptr, &descriptorSetLayouts[0]) != VK_SUCCESS) {
             throw std::runtime_error("failed to create storage descriptor set layout!");
         }
@@ -754,23 +732,20 @@ namespace NextHydro {
             uniformBindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
             uniformBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         }
-        VkDescriptorSetLayoutCreateInfo uniformLayoutInfo;
+        VkDescriptorSetLayoutCreateInfo uniformLayoutInfo {};
         uniformLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         uniformLayoutInfo.pBindings = uniformBindings.data();
         uniformLayoutInfo.bindingCount = uniformBufferNum;
-        uniformLayoutInfo.pNext = nullptr;
-        uniformLayoutInfo.flags = 0;
         if (vkCreateDescriptorSetLayout(device, &uniformLayoutInfo, nullptr, &descriptorSetLayouts[1]) != VK_SUCCESS) {
             throw std::runtime_error("failed to create uniform descriptor set layout!");
         }
 
         // Allocate descriptor set in GPU
-        VkDescriptorSetAllocateInfo allocInfo;
+        VkDescriptorSetAllocateInfo allocInfo {};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorSetCount = descriptorSetLayouts.size();
         allocInfo.pSetLayouts = descriptorSetLayouts.data();
         allocInfo.descriptorPool = descriptorPool;
-        allocInfo.pNext = nullptr;
         descriptorSetPool.resize(descriptorSetLayouts.size());
         if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSetPool.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate descriptor set for descriptor set pool!");
@@ -808,12 +783,11 @@ namespace NextHydro {
             const auto& pipeline = name_pipeline_map.emplace(name, std::make_shared<ComputePipeline>(device, name.c_str(), glslCode.c_str())).first->second;
 
             // Allocate descriptor sets for pipeline
-            VkDescriptorSetAllocateInfo pipelineAllocInfo;
+            VkDescriptorSetAllocateInfo pipelineAllocInfo {};
             pipelineAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            pipelineAllocInfo.descriptorPool = descriptorPool;
             pipelineAllocInfo.descriptorSetCount = static_cast<uint32_t>(pipeline->descriptorSetLayout.size());
             pipelineAllocInfo.pSetLayouts = pipeline->descriptorSetLayout.data();
-            pipelineAllocInfo.pNext = nullptr;
+            pipelineAllocInfo.descriptorPool = descriptorPool;
 
             if (vkAllocateDescriptorSets(device, &pipelineAllocInfo, pipeline->descriptorSets.data()) != VK_SUCCESS) {
                 throw std::runtime_error("failed to allocate descriptor sets for pipeline!");
@@ -826,7 +800,7 @@ namespace NextHydro {
                 auto bindingSet = pipeline->bindingResourceInfo[i][0];
                 const auto& bindingInfo = buffer_descriptorSetPool_map[bindingName];
 
-                VkCopyDescriptorSet copyDescriptorSet;
+                VkCopyDescriptorSet copyDescriptorSet {};
                 copyDescriptorSet.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
                 copyDescriptorSet.srcSet = descriptorSetPool[bindingInfo[0]];
                 copyDescriptorSet.srcBinding = bindingInfo[1];
@@ -835,7 +809,6 @@ namespace NextHydro {
                 copyDescriptorSet.dstBinding = bindingId;
                 copyDescriptorSet.dstArrayElement = 0;
                 copyDescriptorSet.descriptorCount = 1;
-                copyDescriptorSet.pNext = nullptr;
                 descriptorCopySets.emplace_back(copyDescriptorSet);
             }
         }
@@ -895,7 +868,7 @@ namespace NextHydro {
 
     void Core::runScript() {
 
-        Flag flag{ .f = 0.0 };
+        Flag flag {};
         const auto buffer = name_buffer_map["scalars"];
         for (const auto& node : flowNode_list) {
 
@@ -953,7 +926,7 @@ namespace NextHydro {
     bool Core::step() {
 
         // Run Command Node<__STEP__>
-        Flag flag{ .f = 0.0 };
+        Flag flag {};
         const auto buffer = name_buffer_map["scalars"];
         for (const auto& node : flowNode_list) {
             executeNode(node.get());

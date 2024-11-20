@@ -67,7 +67,7 @@ namespace NextHydro {
         void                                executeNode(ICommandNode* node);
 
         // Basic Operation for Computation
-        void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0);
+        void                                copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) const;
         static void                         dispatch(const VkCommandBuffer& commandBuffer, const ComputePipeline* pipeline, std::array<uint32_t, 3> groupCounts);
         void                                updateBindings() const;
 
@@ -76,8 +76,8 @@ namespace NextHydro {
 
         // Create Buffers
         [[nodiscard]] Buffer                createTempStagingBuffer(VkDeviceSize size) const;
-        void                                createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory);
-        void                                createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory);
+        void                                createUniformBuffer(const std::string& name, Buffer*& uniformBuffer, Block& blockMemory) const;
+        void                                createStorageBuffer(const std::string& name, Buffer*& storageBuffer, Block& blockMemory) const;
         void                                createStagingBuffer(const std::string& name, Buffer*& uniformBuffer, VkDeviceSize size) const;
 
     private:

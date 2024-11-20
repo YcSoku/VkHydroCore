@@ -1,0 +1,18 @@
+import os
+import time
+import pyHydroCore
+
+if __name__ == "__main__":
+
+    core = pyHydroCore.Core()
+
+    start_time_sim = time.time()
+
+    core.initialization(os.path.join("@TEST_RESOURCE_PATH@/run.hcs.json"))
+    while core.step():
+        pass
+
+    end_time_sim = time.time()
+
+    print("\n============ OVER ============\n")
+    print(f"Time Simulaiton Together: {end_time_sim - start_time_sim}\n")

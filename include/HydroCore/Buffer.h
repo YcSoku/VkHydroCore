@@ -51,8 +51,6 @@ namespace NextHydro {
         {
             create(physicalDevice, usage, properties);
         }
-        ~Buffer() {
-        }
 
         void writeData(char* pData) {
 
@@ -111,9 +109,9 @@ namespace NextHydro {
 
             VkBufferCreateInfo bufferInfo {};
             bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = size;
-            bufferInfo.usage = usage;
             bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            bufferInfo.usage = usage;
+            bufferInfo.size = size;
 
             if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create buffer!");
@@ -122,11 +120,10 @@ namespace NextHydro {
             VkMemoryRequirements memRequirements;
             vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
-            VkMemoryAllocateInfo allocInfo;
+            VkMemoryAllocateInfo allocInfo {};
             allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-            allocInfo.allocationSize = memRequirements.size;
             allocInfo.memoryTypeIndex = Buffer::findMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties);
-            allocInfo.pNext = nullptr;
+            allocInfo.allocationSize = memRequirements.size;
 
             if (vkAllocateMemory(m_device, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
                 throw std::runtime_error("failed to allocate buffer memory");

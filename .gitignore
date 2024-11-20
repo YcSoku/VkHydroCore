@@ -4,5 +4,3 @@ build
 resource
 .idea
 .DS_Store
-
-test/res/run.hcs.org.json
