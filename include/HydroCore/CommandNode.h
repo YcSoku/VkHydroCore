@@ -120,11 +120,10 @@ namespace NextHydro {
         }
 
         void postProcessForDiscreteGPU(const VkCommandBuffer& commandBuffer) const {
-            VkBufferCopy copyRegion = {
-                    .srcOffset = flagIndex * 4,
-                    .dstOffset = 0,
-                    .size = 4,
-            };
+            VkBufferCopy copyRegion {};
+            copyRegion.srcOffset = flagIndex * 4;
+            copyRegion.dstOffset = 0;
+            copyRegion.size = 4;
             vkCmdCopyBuffer(commandBuffer, flagBuffer->buffer, stagingBuffer->buffer, 1, &copyRegion);
         }
     };

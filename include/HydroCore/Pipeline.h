@@ -128,13 +128,12 @@ namespace NextHydro {
 
                 for (size_t j = 0; j < binding_count; ++j) {
                     auto binding = reflector->prototypeModule.descriptor_sets[i].bindings[j];
-                    bindingInfo[j] = VkDescriptorSetLayoutBinding{
-                            .binding = binding->binding,
-                            .descriptorType = static_cast<VkDescriptorType>(binding->descriptor_type),
-                            .descriptorCount = binding->count,
-                            .stageFlags = reflector->prototypeModule.shader_stage,
-                            .pImmutableSamplers = nullptr
-                    };
+                    bindingInfo[j] = {};
+                    bindingInfo[j].binding = binding->binding;
+                    bindingInfo[j].descriptorType = static_cast<VkDescriptorType>(binding->descriptor_type);
+                    bindingInfo[j].descriptorCount = binding->count;
+                    bindingInfo[j].stageFlags = reflector->prototypeModule.shader_stage;
+                    bindingInfo[j].pImmutableSamplers = nullptr;
                 }
                 VkDescriptorSetLayoutCreateInfo layoutInfo {};
                 layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

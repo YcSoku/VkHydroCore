@@ -17,7 +17,7 @@ int main() {
 //    core->parseScript(jsonPath.c_str());
 //    core->runScript();
 
-    core->initialization(jsonPath);
+    core->initialization(jsonPath.string());
     auto start = std::chrono::high_resolution_clock::now();
 
     while(core->step());
